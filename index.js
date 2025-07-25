@@ -54,10 +54,14 @@ const updateUser = async (userId, userData) => {
 const getGeoInfo = async (locationName) => {
   try {
     const response = await axios.get('http://api.openweathermap.org/geo/1.0/direct', {
-      params: { q: `${locationName},JP`, limit: 1, appid: OPEN_WEATHER_API_KEY }
+      params: { q: `${locationName},JP`, limit: 5, appid: process.env.OPEN_WEATHER_API_KEY }
     });
-    return (response.data && response.data.length > 0) ? response.data[0] : null;
-  } catch (error) { console.error("Geocoding API Error:", error.response?.data || error.message); return null; }
+    // APIからの応答が配列でなければ、空の配列を返すようにする
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) { 
+    console.error("OpenWeatherMap Geocoding API Error:", error.response?.data || error.message); 
+    return []; // エラーの場合も必ず空の配列を返す
+  }
 };
 const getWeather = async (user) => {
   if (!user || !user.lat || !user.lon) return 'ごめん、天気を調べるための地域が設定されてへんわ。';
@@ -177,18 +181,26 @@ const handleEvent = async (event) => {
           }
           return client.replyMessage(event.replyToken, { type: 'text', text: `「${userText}」やね。いくつか候補があるみたいやけど、どの都道府県のこと？`, quickReply: { items: prefectures.map(p => ({ type: 'action', action: { type: 'message', label: p, text: p } })) }});
         }
-        case 'awaiting_prefecture_clarification': {
-          const candidates = user.temp.location_candidates || [];
-          const chosen = candidates.find(loc => loc.state === userText);
-          if (!chosen) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' }); }
-          user.location = chosen.local_names?.ja || chosen.name;
-          user.prefecture = chosen.state;
-          user.lat = chosen.lat; user.lon = chosen.lon;
-          user.setupState = 'awaiting_time';
-          delete user.temp;
-          await updateUser(userId, user);
-          return client.replyMessage(event.replyToken, { type: 'text', text: `おおきに！地域は「${user.location}」で覚えたで。\n\n次は、毎朝の通知は何時がええ？` });
+        // ...
+      case 'awaiting_prefecture_clarification': {
+        // tempに保存されたデータが配列であることを確認する
+        const candidates = Array.isArray(user.temp?.location_candidates) ? user.temp.location_candidates : [];
+        const chosen = candidates.find(loc => loc.state === userText);
+        
+        if (!chosen) { 
+          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' }); 
         }
+        
+        user.location = chosen.local_names?.ja || chosen.name;
+        user.prefecture = chosen.state;
+        user.lat = chosen.lat; 
+        user.lon = chosen.lon;
+        user.setupState = 'awaiting_time';
+        delete user.temp;
+        await updateUser(userId, user);
+        return client.replyMessage(event.replyToken, { type: 'text', text: `おおきに！地域は「${user.location}」で覚えたで。\n\n次は、毎朝の通知は何時がええ？` });
+      }
+// ...
         case 'awaiting_time': {
           user.notificationTime = userText;
           user.setupState = 'awaiting_route';
