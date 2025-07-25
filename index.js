@@ -38,7 +38,8 @@ const getUser = async (userId) => {
 const createUser = async (userId) => {
   const newUser = {
     setupState: 'awaiting_location', location: null, prefecture: null, lat: null, lon: null,
-    notificationTime: null, trainLines: [],
+    notificationTime: null, 
+    trainLines: [], // ★ 単数形から複数形に変更し、配列として初期化
     garbageDay: {}, reminders: [], temp: {},
   };
   await pool.query('INSERT INTO users (user_id, data) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET data = $2', [userId, newUser]);
@@ -172,12 +173,14 @@ const handleEvent = async (event) => {
       case 'awaiting_route': {
         const match = userText.match(/(.+)から(.+)/);
         if (!match) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、「〇〇から〇〇」の形で教えてな。' }); }
+        
         const [ , departureName, arrivalName ] = match;
         const departureStations = await findStation(departureName.trim());
         const arrivalStations = await findStation(arrivalName.trim());
         if (departureStations.length === 0 || arrivalStations.length === 0) {
           return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、駅が見つけられへんかったわ。もう一度、正しい駅名で教えてくれる？' });
         }
+
         const departureLines = departureStations[0].line.split(' ');
         const arrivalLines = arrivalStations[0].line.split(' ');
         const allLines = [...new Set([...departureLines, ...arrivalLines])];
@@ -189,18 +192,18 @@ const handleEvent = async (event) => {
         const quickReplyItems = [...allLines.map(l => ({ type: 'action', action: { type: 'message', label: l, text: l }})), { type: 'action', action: { type: 'message', label: '完了', text: '完了' }}].slice(0,13);
         return client.replyMessage(event.replyToken, {
           type: 'text',
-          text: `「${departureName}」から「${arrivalName}」やね。その経路で使いそうな路線を、下のボタンで全部選んでな。選び終わったら「完了」を押してや。`,
+          text: `「${departureName}」から「${arrivalName}」やね。その経路で使う路線を、下のボタンで全部選んでな。選び終わったら「完了」を押してや。`,
           quickReply: { items: quickReplyItems }
         });
       }
+      
       case 'awaiting_train_selection': {
-        const candidates = user.temp.line_candidates || [];
         if (userText === '完了') {
-          user.trainLines = user.temp.selected_lines || [];
+          user.trainLines = user.temp.selected_lines || []; // ★ 選択された複数路線を保存
           user.setupState = 'awaiting_garbage';
           delete user.temp;
           await updateUser(userId, user);
-          return client.replyMessage(event.replyToken, { type: 'text', text: `了解！その路線を毎朝チェックするで。\n\n最後に、ゴミの日を教えてくれる？` });
+          return client.replyMessage(event.replyToken, { type: 'text', text: `了解！その路線を毎朝チェックするで。\n\n最後に、ゴミの日を教えてくれる？\n（例：「可燃ゴミは月曜、不燃ゴミは木曜」のようにまとめてもええで）` });
         }
         if (candidates.includes(userText)) {
           let selected = user.temp.selected_lines || [];
@@ -221,22 +224,30 @@ const handleEvent = async (event) => {
         }
       }
       case 'awaiting_garbage': {
-        if (userText === 'おわり' || userText === 'なし') {
+        if (userText.includes('おわり') || userText.includes('終わり') || userText.includes('なし')) {
           user.setupState = 'complete';
           await updateUser(userId, user);
           return client.replyMessage(event.replyToken, { type: 'text', text: '設定おおきに！これで全部や！' });
         }
-        const garbageMatch = userText.match(/(.+?ゴミ)は?(\S+?)曜日?/);
-        if (garbageMatch) {
-          const dayMap = { '日':0, '月':1, '火':2, '水':3, '木':4, '金':5, '土':6 };
-          const [ , garbageType, dayOfWeek ] = garbageMatch;
+
+        // ▼▼▼ 一文から複数のゴミの日を読み取るように修正 ▼▼▼
+        const garbageMatches = userText.matchAll(/(.+?ゴミ)は?(\S+?)曜日?/g);
+        const dayMap = { '日':0, '月':1, '火':2, '水':3, '木':4, '金':5, '土':6 };
+        let found = false;
+        for (const match of garbageMatches) {
+          const [ , garbageType, dayOfWeek ] = match;
           if (dayMap[dayOfWeek] !== undefined) {
             user.garbageDay[dayMap[dayOfWeek]] = garbageType.trim();
-            await updateUser(userId, user);
-            return client.replyMessage(event.replyToken, { type: 'text', text: `了解、「${garbageType.trim()}」が${dayOfWeek}曜日やね。他にもあったら教えてな。（終わったら「おわり」と入力）` });
+            found = true;
           }
         }
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、うまく聞き取れへんかったわ。「〇〇ゴミは△曜日」の形で教えてくれる？' });
+        
+        if (found) {
+          await updateUser(userId, user);
+          return client.replyMessage(event.replyToken, { type: 'text', text: `了解！他にもあったら教えてな。（終わったら「おわり」か「終わり」と入力）` });
+        } else {
+          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、うまく聞き取れへんかったわ。「〇〇ゴミは△曜日」の形で教えてくれる？' });
+        }
       }
     }
     return;
