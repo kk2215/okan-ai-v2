@@ -196,7 +196,19 @@ const handleEvent = async (event) => {
           quickReply: { items: quickReplyItems }
         });
       }
-      
+      case 'awaiting_primary_line': {
+        // ▼▼▼ ここの変数名を修正しました ▼▼▼
+        const candidates = user.temp.line_candidates || [];
+        if (!candidates.includes(userText)) {
+          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' });
+        }
+        user.trainLine = userText; // ここで主要路線を保存
+        user.setupState = 'awaiting_garbage';
+        delete user.temp;
+        await updateUser(userId, user);
+        return client.replyMessage(event.replyToken, { type: 'text', text: `「${user.trainLine}」やね、覚えたで！\n\n最後に、ゴミの日を教えてくれる？` });
+      }
+
       case 'awaiting_train_selection': {
         if (userText === '完了') {
           user.trainLines = user.temp.selected_lines || []; // ★ 選択された複数路線を保存
