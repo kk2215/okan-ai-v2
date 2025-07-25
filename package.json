@@ -1,5 +1,5 @@
 {
-  "name": "okan-ai-v2",
+  "name": "okan-ai",
   "version": "1.0.0",
   "description": "LINE Bot Okan AI",
   "main": "index.js",
@@ -9,7 +9,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@googlemaps/google-maps-services-js": "^3.4.0",
     "@line/bot-sdk": "^9.2.2",
     "axios": "^1.7.2",
     "cheerio": "^1.0.0-rc.12",
