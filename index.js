@@ -41,7 +41,7 @@ const getUser = async (userId) => {
 const createUser = async (userId) => {
   const newUser = {
     setupState: 'awaiting_location', location: null, prefecture: null, lat: null, lon: null,
-    notificationTime: null, departureStation: null, arrivalStation: null, trainLines: [],
+    notificationTime: null, trainLines: [], departureStation: null, arrivalStation: null,
     garbageDay: {}, reminders: [], temp: {},
   };
   await pool.query('INSERT INTO users (user_id, data) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET data = $2', [userId, newUser]);
@@ -95,6 +95,7 @@ const getRouteInfo = async (departure, arrival) => {
     const departurePlaceId = await getPlaceId(departure);
     const arrivalPlaceId = await getPlaceId(arrival);
     if (!departurePlaceId || !arrivalPlaceId) { return `ごめん、「${!departurePlaceId ? departure : arrival}」の場所を正確に特定できひんかったわ…`; }
+
     const response = await mapsClient.directions({
       params: {
         origin: `place_id:${departurePlaceId}`,
@@ -106,14 +107,17 @@ const getRouteInfo = async (departure, arrival) => {
       }
     });
     if (response.data.status !== 'OK' || response.data.routes.length === 0) { return `ごめん、「${departure}」から「${arrival}」までの経路は見つけられへんかったわ…\n（Googleからの返答：${response.data.status}）`; }
+    
     const leg = response.data.routes[0].legs[0];
     const departureStation = leg.start_address.replace(/、日本、〒\d{3}-\d{4}/, '');
     const arrivalStation = leg.end_address.replace(/、日本、〒\d{3}-\d{4}/, '');
     const transitSteps = leg.steps.filter(step => step.travel_mode === 'TRANSIT');
     if (transitSteps.length === 0) { return 'ごめん、その2駅間の電車経路は見つけられへんかった…'; }
+
     let message = `「${departureStation}」から「${arrivalStation}」までやね。\n`;
     const lines = transitSteps.map(step => step.transit_details.line.name);
     let primaryLine = lines[0];
+
     if (lines.length === 1) {
       message += `「${primaryLine}」に乗って行くんやね。覚えたで！`;
     } else {
@@ -138,10 +142,7 @@ const getRouteInfo = async (departure, arrival) => {
   }
 };
 const getTrainStatus = async (trainLineName) => {
-  const lineUrlMap = {
-    '山手線': 'https://transit.yahoo.co.jp/diainfo/line/21/0',
-    '京浜東北線': 'https://transit.yahoo.co.jp/diainfo/line/22/0',
-  };
+  const lineUrlMap = { '山手線': 'https://transit.yahoo.co.jp/diainfo/line/21/0', '京浜東北線': 'https://transit.yahoo.co.jp/diainfo/line/22/0' };
   const url = lineUrlMap[trainLineName];
   if (!url) { return `・${trainLineName}：運行情報URL未登録`; }
   try {
@@ -287,7 +288,9 @@ const handleEvent = async (event) => {
         const departureQuery = departureName.trim().endsWith('駅') ? departureName.trim() : `${departureName.trim()}駅`;
         const arrivalQuery = arrivalName.trim().endsWith('駅') ? arrivalName.trim() : `${arrivalName.trim()}駅`;
         const routeResult = await getRouteInfo(departureQuery, arrivalQuery);
-        if (typeof routeResult === 'string') { return client.replyMessage(event.replyToken, { type: 'text', text: routeResult }); }
+        if (typeof routeResult === 'string') {
+          return client.replyMessage(event.replyToken, { type: 'text', text: routeResult });
+        }
         user.departureStation = departureName.trim();
         user.arrivalStation = arrivalName.trim();
         if (routeResult.lines.length === 1) {
@@ -297,7 +300,7 @@ const handleEvent = async (event) => {
           return client.replyMessage(event.replyToken, { type: 'text', text: `${routeResult.message}\n\n最後に、ゴミの日を教えてくれる？` });
         } else {
           user.temp = { line_candidates: routeResult.lines };
-          user.setupState = 'awaiting_primary_line';
+          user.setupState = 'awaiting_primary_line_selection';
           await updateUser(userId, user);
           return client.replyMessage(event.replyToken, {
             type: 'text',
@@ -306,12 +309,12 @@ const handleEvent = async (event) => {
           });
         }
       }
-      case 'awaiting_primary_line': {
+      case 'awaiting_primary_line_selection': {
         const candidates = user.temp.line_candidates || [];
         if (!candidates.includes(userText)) {
           return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' });
         }
-        user.trainLines = [userText]; // 主要路線を一つだけ保存
+        user.trainLines = [userText];
         user.setupState = 'awaiting_garbage';
         delete user.temp;
         await updateUser(userId, user);
@@ -342,10 +345,9 @@ const handleEvent = async (event) => {
       }
     }
   } else {
-    // 設定完了後の会話処理
     if (userText.includes('リマインド') || userText.includes('思い出させて')) {
       let textToParse = userText;
-      const triggerWords = ["ってリマインドして", "と思い出させて", "ってリマインド", "と思い出させ"];
+      const triggerWords = ["ってリマindoshite", "と思い出させて", "ってリマインド", "と思い出させ"];
       triggerWords.forEach(word => { textToParse = textToParse.replace(new RegExp(word + '$'), ''); });
       const now = new Date();
       const results = chrono.ja.parse(textToParse, now, { forwardDate: true });
