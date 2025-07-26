@@ -188,12 +188,18 @@ const handleEvent = async (event) => {
         return client.replyMessage(event.replyToken, { type: 'text', text: `「${userText}」やね。いくつか候補があるみたいやけど、どの都道府県のこと？`, quickReply: { items: prefectures.map(p => ({ type: 'action', action: { type: 'message', label: p, text: p } })) }});
       }
       case 'awaiting_prefecture_clarification': {
-        const candidates = user.temp.location_candidates || [];
+        // ▼▼▼ この部分を、より安全なコードに修正しました ▼▼▼
+        const candidates = Array.isArray(user.temp?.location_candidates) ? user.temp.location_candidates : [];
         const chosen = candidates.find(loc => loc.state === userText);
-        if (!chosen) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' }); }
+        
+        if (!chosen) { 
+          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' }); 
+        }
+        
         user.location = chosen.local_names?.ja || chosen.name;
         user.prefecture = chosen.state;
-        user.lat = chosen.lat; user.lon = chosen.lon;
+        user.lat = chosen.lat; 
+        user.lon = chosen.lon;
         user.setupState = 'awaiting_time';
         delete user.temp;
         await updateUser(userId, user);
