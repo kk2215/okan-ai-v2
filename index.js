@@ -157,9 +157,7 @@ cron.schedule('* * * * *', async () => {
   } catch (err) { console.error('リマインダー処理でエラー:', err); }
 }, { timezone: "Asia/Tokyo" });
 
-// ----------------------------------------------------------------
-// 6. LINEからのメッセージを処理するメインの部分
-// ----------------------------------------------------------------
+// 6. LINEからのメッセージを処理するメインの部分【リマインダー機能最終版】
 const handleEvent = async (event) => {
   const userId = event.source.userId;
 
@@ -180,12 +178,41 @@ const handleEvent = async (event) => {
   if (user.setupState && user.setupState !== 'complete') {
     switch (user.setupState) {
       case 'awaiting_location': {
-        const geoData = await getGeoInfo(userText);
-        if (!geoData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、その地名は見つけられへんかったわ。もう一度教えてくれる？' }); }
-        user.location = geoData.local_names?.ja || geoData.name;
-        user.prefecture = geoData.state;
-        user.lat = geoData.lat; user.lon = geoData.lon;
+        const locations = await getGeoInfo(userText);
+        if (locations.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、その地名は見つけられへんかったわ。もう一度教えてくれる？' }); }
+        if (locations.length === 1) {
+          const result = locations[0];
+          user.location = result.local_names?.ja || result.name;
+          user.prefecture = result.state;
+          user.lat = result.lat; user.lon = result.lon;
+          user.setupState = 'awaiting_time';
+          await updateUser(userId, user);
+          return client.replyMessage(event.replyToken, { type: 'text', text: `おおきに！地域は「${user.location}」で覚えたで。\n\n次は、毎朝の通知は何時がええ？` });
+        }
+        user.temp = { location_candidates: locations };
+        user.setupState = 'awaiting_prefecture_clarification';
+        await updateUser(userId, user);
+        const prefectures = [...new Set(locations.map(loc => loc.state).filter(Boolean))];
+        if (prefectures.length <= 1) {
+            const result = locations[0];
+            user.location = result.local_names?.ja || result.name;
+            user.prefecture = result.state;
+            user.lat = result.lat; user.lon = result.lon;
+            user.setupState = 'awaiting_time';
+            await updateUser(userId, user);
+            return client.replyMessage(event.replyToken, { type: 'text', text: `おおきに！地域は「${user.location}」で覚えたで。\n\n次は、毎朝の通知は何時がええ？` });
+        }
+        return client.replyMessage(event.replyToken, { type: 'text', text: `「${userText}」やね。いくつか候補があるみたいやけど、どの都道府県のこと？`, quickReply: { items: prefectures.map(p => ({ type: 'action', action: { type: 'message', label: p, text: p } })) }});
+      }
+      case 'awaiting_prefecture_clarification': {
+        const candidates = Array.isArray(user.temp?.location_candidates) ? user.temp.location_candidates : [];
+        const chosen = candidates.find(loc => loc.state === userText);
+        if (!chosen) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' }); }
+        user.location = chosen.local_names?.ja || chosen.name;
+        user.prefecture = chosen.state;
+        user.lat = chosen.lat; user.lon = chosen.lon;
         user.setupState = 'awaiting_time';
+        delete user.temp;
         await updateUser(userId, user);
         return client.replyMessage(event.replyToken, { type: 'text', text: `おおきに！地域は「${user.location}」で覚えたで。\n\n次は、毎朝の通知は何時がええ？` });
       }
@@ -199,50 +226,38 @@ const handleEvent = async (event) => {
         const match = userText.match(/(.+)から(.+)/);
         if (!match) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、「〇〇から〇〇」の形で教えてな。' }); }
         const [ , departureName, arrivalName ] = match;
-        const departureStations = await findStation(departureName.trim());
-        const arrivalStations = await findStation(arrivalName.trim());
-        if (departureStations.length === 0 || arrivalStations.length === 0) {
-          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、駅が見つけられへんかったわ。もう一度、正しい駅名で教えてくれる？' });
-        }
-        const departureLines = departureStations[0].line.split(' ');
-        const arrivalLines = arrivalStations[0].line.split(' ');
-        const allLines = [...new Set([...departureLines, ...arrivalLines])];
-
-        user.temp = { line_candidates: allLines, selected_lines: [] };
-        user.setupState = 'awaiting_train_selection';
-        await updateUser(userId, user);
-
-        const quickReplyItems = [...allLines.map(l => ({ type: 'action', action: { type: 'message', label: l, text: l }})), { type: 'action', action: { type: 'message', label: '完了', text: '完了' }}].slice(0,13);
-        return client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: `「${departureName}」から「${arrivalName}」やね。その経路で使いそうな路線を、下のボタンで全部選んでな。選び終わったら「完了」を押してや。`,
-          quickReply: { items: quickReplyItems }
-        });
-      }
-      case 'awaiting_train_selection': {
-        const candidates = user.temp.line_candidates || [];
-        if (userText === '完了') {
-          user.trainLines = user.temp.selected_lines || [];
+        const departureQuery = departureName.trim().endsWith('駅') ? departureName.trim() : `${departureName.trim()}駅`;
+        const arrivalQuery = arrivalName.trim().endsWith('駅') ? arrivalName.trim() : `${arrivalName.trim()}駅`;
+        const routeResult = await getRouteInfo(departureQuery, arrivalQuery);
+        if (typeof routeResult === 'string') { return client.replyMessage(event.replyToken, { type: 'text', text: routeResult }); }
+        user.departureStation = departureName.trim();
+        user.arrivalStation = arrivalName.trim();
+        if (routeResult.lines.length === 1) {
+          user.trainLines = routeResult.lines;
           user.setupState = 'awaiting_garbage';
-          delete user.temp;
           await updateUser(userId, user);
-          return client.replyMessage(event.replyToken, { type: 'text', text: `了解！その路線を毎朝チェックするで。\n\n最後に、ゴミの日を教えてくれる？` });
-        }
-        if (candidates.includes(userText)) {
-          let selected = user.temp.selected_lines || [];
-          if (!selected.includes(userText)) { selected.push(userText); }
-          user.temp.selected_lines = selected;
+          return client.replyMessage(event.replyToken, { type: 'text', text: `${routeResult.message}\n\n最後に、ゴミの日を教えてくれる？` });
+        } else {
+          user.temp = { line_candidates: routeResult.lines };
+          user.setupState = 'awaiting_primary_line_selection';
           await updateUser(userId, user);
-          const remainingCandidates = candidates.filter(l => !selected.includes(l));
-          const quickReplyItems = [...remainingCandidates.map(l => ({ type: 'action', action: { type: 'message', label: l, text: l }})), { type: 'action', action: { type: 'message', label: '完了', text: '完了' }}].slice(0,13);
           return client.replyMessage(event.replyToken, {
             type: 'text',
-            text: `「${userText}」を追加したで。他になければ「完了」を押してな。`,
-            quickReply: { items: quickReplyItems }
+            text: `${routeResult.message}\n\nところで、毎朝の運行状況は、どの路線を一番気にしてる？ボタンで教えてな。`,
+            quickReply: { items: routeResult.lines.map(l => ({ type: 'action', action: { type: 'message', label: l, text: l } })) }
           });
-        } else {
-          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、ボタンから選んでくれるかな？' });
         }
+      }
+      case 'awaiting_primary_line_selection': {
+        const candidates = user.temp.line_candidates || [];
+        if (!candidates.includes(userText)) {
+          return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、下のボタンから選んでくれるかな？' });
+        }
+        user.trainLines = [userText];
+        user.setupState = 'awaiting_garbage';
+        delete user.temp;
+        await updateUser(userId, user);
+        return client.replyMessage(event.replyToken, { type: 'text', text: `「${userText}」やね、覚えたで！\n\n最後に、ゴミの日を教えてくれる？` });
       }
       case 'awaiting_garbage': {
         if (userText.includes('おわり') || userText.includes('終わり') || userText.includes('なし')) {
@@ -268,11 +283,9 @@ const handleEvent = async (event) => {
         }
       }
     }
-    return;
-  }
-
-  if (userText.includes('リマインド') || userText.includes('思い出させて')) {
-      // まず、文章から「〇〇ってリマインドして」のような命令部分を取り除く
+  } else {
+    // 設定完了後の会話処理
+    if (userText.includes('リマインド') || userText.includes('思い出させて')) {
       let textToParse = userText;
       const triggerWords = ["ってリマインドして", "と思い出させて", "ってリマインド", "と思い出させ"];
       triggerWords.forEach(word => {
@@ -280,26 +293,28 @@ const handleEvent = async (event) => {
           textToParse = textToParse.slice(0, -word.length);
         }
       });
-
-      // 残った文章（「明日の15時に歯医者」など）から、日時を解析する
-      const now = new Date();
-      const results = chrono.ja.parse(textToParse, now, { forwardDate: true });
+      
+      const japanTimeZone = 'Asia/Tokyo';
+      const nowInJapan = new Date(new Date().toLocaleString('en-US', { timeZone: japanTimeZone }));
+      const results = chrono.ja.parse(textToParse, nowInJapan, { forwardDate: true });
 
       if (results.length > 0) {
         const reminderDate = results[0].start.date();
-        // 解析された日時部分を、さらに文章から取り除いて、純粋なタスク内容を抽出する
         const task = textToParse.replace(results[0].text, '').trim().replace(/^[にでをは、。]/, '').trim();
 
         if (task) {
           user.reminders.push({ date: reminderDate.toISOString(), task });
           await updateUser(userId, user);
-          const formattedDate = formatInTimeZone(reminderDate, 'Asia/Tokyo', 'yyyy/MM/dd HH:mm');
+          const formattedDate = formatInTimeZone(reminderDate, japanTimeZone, 'yyyy/MM/dd HH:mm');
           return client.replyMessage(event.replyToken, { type: 'text', text: `あいよ！\n${formattedDate}に「${task}」やね。覚えとく！` });
         }
       }
     }
-  if (userText.includes('ご飯')) { return client.replyMessage(event.replyToken, getRecipe()); }
-  return client.replyMessage(event.replyToken, { type: 'text', text: 'うんうん。' });
+    if (userText.includes('ご飯') || userText.includes('ごはん')) {
+      return client.replyMessage(event.replyToken, getRecipe());
+    }
+    return client.replyMessage(event.replyToken, { type: 'text', text: 'うんうん。' });
+  }
 };
 
 // ----------------------------------------------------------------
