@@ -271,23 +271,33 @@ const handleEvent = async (event) => {
     return;
   }
 
-  if (userText.includes('リマインド')) {
-    let textToParse = userText;
-    const triggerWords = ["ってリマインドして", "と思い出させて", "ってリマインド", "と思い出させ"];
-    triggerWords.forEach(word => { textToParse = textToParse.replace(new RegExp(word + '$'), ''); });
-    const now = new Date();
-    const results = chrono.ja.parse(textToParse, now, { forwardDate: true });
-    if (results.length > 0) {
-      const reminderDate = results[0].start.date();
-      const task = textToParse.replace(results[0].text, '').trim().replace(/^[にでをは]/, '').trim();
-      if (task) {
-        user.reminders.push({ date: reminderDate.toISOString(), task });
-        await updateUser(userId, user);
-        const formattedDate = formatInTimeZone(reminderDate, 'Asia/Tokyo', 'yyyy/MM/dd HH:mm');
-        return client.replyMessage(event.replyToken, { type: 'text', text: `あいよ！\n${formattedDate}に「${task}」やね。覚えとく！` });
+  if (userText.includes('リマインド') || userText.includes('思い出させて')) {
+      // まず、文章から「〇〇ってリマインドして」のような命令部分を取り除く
+      let textToParse = userText;
+      const triggerWords = ["ってリマインドして", "と思い出させて", "ってリマインド", "と思い出させ"];
+      triggerWords.forEach(word => {
+        if (textToParse.endsWith(word)) {
+          textToParse = textToParse.slice(0, -word.length);
+        }
+      });
+
+      // 残った文章（「明日の15時に歯医者」など）から、日時を解析する
+      const now = new Date();
+      const results = chrono.ja.parse(textToParse, now, { forwardDate: true });
+
+      if (results.length > 0) {
+        const reminderDate = results[0].start.date();
+        // 解析された日時部分を、さらに文章から取り除いて、純粋なタスク内容を抽出する
+        const task = textToParse.replace(results[0].text, '').trim().replace(/^[にでをは、。]/, '').trim();
+
+        if (task) {
+          user.reminders.push({ date: reminderDate.toISOString(), task });
+          await updateUser(userId, user);
+          const formattedDate = formatInTimeZone(reminderDate, 'Asia/Tokyo', 'yyyy/MM/dd HH:mm');
+          return client.replyMessage(event.replyToken, { type: 'text', text: `あいよ！\n${formattedDate}に「${task}」やね。覚えとく！` });
+        }
       }
     }
-  }
   if (userText.includes('ご飯')) { return client.replyMessage(event.replyToken, getRecipe()); }
   return client.replyMessage(event.replyToken, { type: 'text', text: 'うんうん。' });
 };
