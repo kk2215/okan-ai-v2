@@ -160,7 +160,7 @@ cron.schedule('* * * * *', async () => {
   } catch (err) { console.error('リマインダー処理でエラー:', err); }
 }, { timezone: "Asia/Tokyo" });
 
-// 6. LINEからのメッセージを処理するメインの部分【リマインダー機能最終版】
+// 6. LINEからのメッセージを処理するメインの部分
 const handleEvent = async (event) => {
   const userId = event.source.userId;
 
@@ -228,13 +228,17 @@ const handleEvent = async (event) => {
       case 'awaiting_route': {
         const match = userText.match(/(.+)から(.+)/);
         if (!match) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、「〇〇から〇〇」の形で教えてな。' }); }
-        const [ , departureName, arrivalName ] = match;
-        const departureQuery = departureName.trim().endsWith('駅') ? departureName.trim() : `${departureName.trim()}駅`;
-        const arrivalQuery = arrivalName.trim().endsWith('駅') ? arrivalName.trim() : `${arrivalName.trim()}駅`;
-        const routeResult = await getRouteInfo(departureQuery, arrivalQuery);
+        
+        // ▼▼▼ この2行の「駅」を付け足す処理を削除しました ▼▼▼
+        const departureName = match[1].trim();
+        const arrivalName = match[2].trim();
+        
+        const routeResult = await getRouteInfo(departureName, arrivalName);
         if (typeof routeResult === 'string') { return client.replyMessage(event.replyToken, { type: 'text', text: routeResult }); }
-        user.departureStation = departureName.trim();
-        user.arrivalStation = arrivalName.trim();
+        
+        user.departureStation = departureName;
+        user.arrivalStation = arrivalName;
+        
         if (routeResult.lines.length === 1) {
           user.trainLines = routeResult.lines;
           user.setupState = 'awaiting_garbage';
@@ -292,14 +296,11 @@ const handleEvent = async (event) => {
       let textToParse = userText;
       const triggerWords = ["ってリマインドして", "と思い出させて", "ってリマインド", "と思い出させ"];
       triggerWords.forEach(word => {
-        if (textToParse.endsWith(word)) {
-          textToParse = textToParse.slice(0, -word.length);
-        }
+        if (textToParse.endsWith(word)) { textToParse = textToParse.slice(0, -word.length); }
       });
       
-      const japanTimeZone = 'Asia/Tokyo';
-      const nowInJapan = new Date(new Date().toLocaleString('en-US', { timeZone: japanTimeZone }));
-      const results = chrono.ja.parse(textToParse, nowInJapan, { forwardDate: true });
+      const now = new Date();
+      const results = chrono.ja.parse(textToParse, now, { forwardDate: true });
 
       if (results.length > 0) {
         const reminderDate = results[0].start.date();
@@ -308,7 +309,7 @@ const handleEvent = async (event) => {
         if (task) {
           user.reminders.push({ date: reminderDate.toISOString(), task });
           await updateUser(userId, user);
-          const formattedDate = formatInTimeZone(reminderDate, japanTimeZone, 'yyyy/MM/dd HH:mm');
+          const formattedDate = formatInTimeZone(reminderDate, 'Asia/Tokyo', 'yyyy/MM/dd HH:mm');
           return client.replyMessage(event.replyToken, { type: 'text', text: `あいよ！\n${formattedDate}に「${task}」やね。覚えとく！` });
         }
       }
