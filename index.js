@@ -48,9 +48,8 @@ const updateUser = async (userId, userData) => {
   await pool.query('UPDATE users SET data = $1 WHERE user_id = $2', [userData, userId]);
 };
 
-// ----------------------------------------------------------------
 // 4. 各機能の部品 (ヘルパー関数)
-// ----------------------------------------------------------------
+
 const getGeoInfo = async (locationName) => {
   try {
     const response = await axios.get('http://api.openweathermap.org/geo/1.0/direct', {
