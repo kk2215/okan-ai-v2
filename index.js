@@ -54,10 +54,14 @@ const updateUser = async (userId, userData) => {
 const getGeoInfo = async (locationName) => {
   try {
     const response = await axios.get('http://api.openweathermap.org/geo/1.0/direct', {
-      params: { q: `${locationName},JP`, limit: 1, appid: OPEN_WEATHER_API_KEY }
+      params: { q: `${locationName},JP`, limit: 5, appid: process.env.OPEN_WEATHER_API_KEY }
     });
-    return (response.data && response.data.length > 0) ? response.data[0] : null;
-  } catch (error) { console.error("Geocoding API Error:", error.response?.data || error.message); return null; }
+    // APIからの応答が配列であることを確認し、そうでなければ空の配列を返す
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) { 
+    console.error("OpenWeatherMap Geocoding API Error:", error.response?.data || error.message); 
+    return []; // エラーの場合も必ず空の配列を返す
+  }
 };
 const getWeather = async (user) => {
   if (!user || !user.lat || !user.lon) return 'ごめん、天気を調べるための地域が設定されてへんわ。';
