@@ -9,6 +9,7 @@ const axios =require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 const chrono = require('chrono-node');
+// ★ [修正] date-fns-tz のインポート方法を修正
 const { utcToZonedTime, zonedTimeToUtc, format } = require('date-fns-tz');
 
 // LINEとデータベースの接続情報を設定
@@ -522,12 +523,17 @@ async function handleLineRegistrationManual(event, userId, text) {
  * 通知時間の設定を処理する
  */
 async function handleNotificationTime(event, userId, text) {
-    const timeRegex = /^([0-9]|0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/;
-    if (!timeRegex.test(text)) {
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、時間の形がちゃうみたいや。「8:00」とか「07:30」みたいに教えてくれるか？' });
+    // chrono-nodeで自然言語の時間を解析
+    const results = chrono.ja.parse(text);
+
+    if (results.length === 0) {
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、うまく時間が聞き取れへんかったわ。「8時」とか「午前7時半」みたいにもう一回教えてくれるか？' });
     }
 
-    await pool.query("UPDATE users SET notification_time = $1, conversation_state = 'waiting_for_off_days' WHERE user_id = $2", [text, userId]);
+    const date = results[0].start.date();
+    const formattedTime = format(date, 'HH:mm', { timeZone: JST });
+
+    await pool.query("UPDATE users SET notification_time = $1, conversation_state = 'waiting_for_off_days' WHERE user_id = $2", [formattedTime, userId]);
     
     // 曜日選択ボタンを作成
     const days = ['月', '火', '水', '木', '金', '土', '日'];
@@ -574,7 +580,7 @@ async function handleNotificationTime(event, userId, text) {
     };
     
     return client.replyMessage(event.replyToken, [
-        { type: 'text', text: `毎朝${text}やな、了解や！` },
+        { type: 'text', text: `毎朝${formattedTime}やな、了解や！` },
         flexMessage
     ]);
 }
