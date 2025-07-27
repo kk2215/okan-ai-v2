@@ -9,7 +9,6 @@ const axios =require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 const chrono = require('chrono-node');
-// ★ [修正] date-fns-tz のインポート方法を修正
 const { utcToZonedTime, zonedTimeToUtc, format } = require('date-fns-tz');
 
 // LINEとデータベースの接続情報を設定
@@ -98,6 +97,8 @@ async function handleEvent(event) {
             return handleLineRegistrationManual(event, userId, text);
         case 'waiting_for_notification_time':
             return handleNotificationTime(event, userId, text);
+        case 'waiting_for_off_days':
+            return handleOffDays(event, userId, text);
         case 'waiting_for_garbage_day':
             return handleGarbageDayRegistration(event, userId, text);
         default:
@@ -535,54 +536,52 @@ async function handleNotificationTime(event, userId, text) {
 
     await pool.query("UPDATE users SET notification_time = $1, conversation_state = 'waiting_for_off_days' WHERE user_id = $2", [formattedTime, userId]);
     
-    // 曜日選択ボタンを作成
-    const days = ['月', '火', '水', '木', '金', '土', '日'];
-    const buttons = days.map(day => ({
-        type: 'button',
-        action: {
-            type: 'postback',
-            label: day,
-            data: `action=toggle_off_day&day=${day}`
-        },
-        style: 'primary',
-        margin: 'sm'
-    }));
-    buttons.push({
-        type: 'button',
-        action: { type: 'postback', label: '完了', data: 'action=finish_off_days' },
-        style: 'primary',
-        color: '#00B900',
-        margin: 'md'
+    return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `毎朝${formattedTime}やな、了解や！\n通知が要らん曜日はあるか？\n「土日」とか「水曜」みたいに教えてな。なければ「なし」でええで。`
     });
+}
 
-    const flexMessage = {
-        type: 'flex',
-        altText: '通知オフの曜日選択',
-        contents: {
-            type: 'bubble',
-            header: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [{ type: 'text', text: '通知が要らん曜日はあるか？', weight: 'bold', size: 'lg' }]
-            },
-            body: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [{ type: 'text', text: 'もしあれば、要らん曜日を全部選んで「完了」を押してな。なければ、そのまま「完了」でええで。', wrap: true }]
-            },
-            footer: {
-                type: 'box',
-                layout: 'vertical',
-                spacing: 'sm',
-                contents: buttons
-            }
-        }
+/**
+ * 通知オフの曜日を自然言語で登録する
+ */
+async function handleOffDays(event, userId, text) {
+    const dayMap = {
+        '月': 'Monday', '火': 'Tuesday', '水': 'Wednesday', '木': 'Thursday', '金': 'Friday', '土': 'Saturday', '日': 'Sunday',
+        'げつ': 'Monday', 'か': 'Tuesday', 'すい': 'Wednesday', 'もく': 'Thursday', 'きん': 'Friday', 'ど': 'Saturday', 'にち': 'Sunday'
     };
-    
-    return client.replyMessage(event.replyToken, [
-        { type: 'text', text: `毎朝${formattedTime}やな、了解や！` },
-        flexMessage
-    ]);
+    const offDays = new Set();
+    let found = false;
+
+    // 「なし」や「毎日」の場合
+    if (['なし', 'ない', '毎日'].includes(text)) {
+        await pool.query("UPDATE users SET notification_off_days = '[]', conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: '了解や！毎日通知するな！\n最後にゴミの日を教えてな。「燃えるゴミは月曜と木曜」みたいに教えてくれると助かるわ。登録せん場合は「なし」と入力してや。' });
+    }
+
+    // 各曜日の表現をチェック
+    for (const [key, value] of Object.entries(dayMap)) {
+        if (text.includes(key)) {
+            offDays.add(value);
+            found = true;
+        }
+    }
+
+    if (!found) {
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、うまく聞き取れへんかったわ。「土日」とか「水曜」みたいにもう一回教えてくれるか？' });
+    }
+
+    const offDaysArray = Array.from(offDays);
+    const offDaysJapanese = offDaysArray.map(day => {
+        const entry = Object.entries(dayMap).find(([_, val]) => val === day);
+        return entry ? entry[0] + '曜' : '';
+    }).filter(Boolean).join('、');
+
+    await pool.query("UPDATE users SET notification_off_days = $1, conversation_state = 'waiting_for_garbage_day' WHERE user_id = $2", [JSON.stringify(offDaysArray), userId]);
+    return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `ほな、【${offDaysJapanese}】は通知せんようにしとくな！\n最後にゴミの日を教えてな。「燃えるゴミは月曜と木曜」みたいに教えてくれると助かるわ。登録せん場合は「なし」と入力してや。`
+    });
 }
 
 
@@ -708,37 +707,7 @@ async function handlePostbackEvent(event, userId) {
         });
     }
     
-    // 通知オフ曜日のトグル処理
-    if (action === 'toggle_off_day') {
-        const day = data.get('day');
-        const dayMap = {'月':'Monday', '火':'Tuesday', '水':'Wednesday', '木':'Thursday', '金':'Friday', '土':'Saturday', '日':'Sunday'};
-        const dayEng = dayMap[day];
-
-        const userResult = await pool.query('SELECT notification_off_days FROM users WHERE user_id = $1', [userId]);
-        let offDays = userResult.rows[0].notification_off_days ? JSON.parse(userResult.rows[0].notification_off_days) : [];
-
-        let replyText;
-        if (offDays.includes(dayEng)) {
-            offDays = offDays.filter(d => d !== dayEng);
-            replyText = `${day}曜は通知オンにしたで。`;
-        } else {
-            offDays.push(dayEng);
-            replyText = `${day}曜は通知オフにしとくな。`;
-        }
-        await pool.query('UPDATE users SET notification_off_days = $1 WHERE user_id = $2', [JSON.stringify(offDays), userId]);
-        await client.pushMessage(userId, { type: 'text', text: replyText });
-        return Promise.resolve(null);
-    }
-
-    // 通知オフ曜日完了処理
-    if (action === 'finish_off_days') {
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: '通知の休みの曜日、了解や！\n最後にゴミの日を教えてな。\n「燃えるゴミは月曜と木曜」みたいに教えてくれると助かるわ。登録せん場合は「なし」と入力してや。'
-        });
-    }
-
+    // ★ 通知オフ曜日のPostbackは廃止
 
     return Promise.resolve(null);
 }
@@ -827,8 +796,8 @@ async function setupDatabase() {
             lon: 'NUMERIC',
             area_name: 'TEXT',
             temp_route_stations: 'TEXT',
-            notification_time: 'TIME', // ★ 追加
-            notification_off_days: 'TEXT' // ★ 追加 (JSON文字列を保存)
+            notification_time: 'TIME',
+            notification_off_days: 'TEXT'
         };
         for (const [column, type] of Object.entries(usersColumns)) {
             const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
