@@ -234,7 +234,7 @@ async function handleAreaRegistration(event, userId, cityName) {
  */
 async function registerAreaAndProceed(replyToken, userId, location) {
     const { lat, lon } = location;
-    const japaneseName = location.name || (location.local_names && location.local_names.ja);
+    const japaneseName = (location.local_names && location.local_names.ja) || location.name;
     const stateName = location.state || '';
 
     await pool.query(
