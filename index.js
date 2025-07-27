@@ -123,40 +123,103 @@ async function handleEvent(event) {
  * 友だち追加 (フォロー) イベントを処理する
  */
 async function handleFollowEvent(event, userId) {
-    // ... (この関数は変更なし)
+    const userCheck = await pool.query('SELECT * FROM users WHERE user_id = $1', [userId]);
+
+    const welcomeMessage = '友達追加ありがとうな！\nあんたのこと、もっと知りたいさかい、いくつか質問させてな。\n\nまず、あんたが住んでる市区町村を教えてくれるか？（例：渋谷区）';
+    const welcomeBackMessage = 'おかえり！また話せて嬉しいで！\n設定を最初から確認させてな。\n\nあんたが住んでる市区町村を教えてくれるか？（例：新宿区）';
+
+    if (userCheck.rows.length === 0) {
+        // 新規ユーザーの場合
+        console.log(`新規ユーザー (${userId}) をDBに登録します。`);
+        await pool.query("INSERT INTO users (user_id, conversation_state) VALUES ($1, 'waiting_for_area')", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: welcomeMessage });
+    } else {
+        // 再フォローの場合
+        console.log(`既存ユーザー (${userId}) が再フォローしました。`);
+        // 既存の設定をクリアして最初から
+        await Promise.all([
+            pool.query("UPDATE users SET conversation_state = 'waiting_for_area' WHERE user_id = $1", [userId]),
+            pool.query("DELETE FROM train_routes WHERE user_id = $1", [userId]),
+            pool.query("DELETE FROM garbage_days WHERE user_id = $1", [userId])
+        ]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: welcomeBackMessage });
+    }
 }
 
 /**
  * 地域登録後、出発駅を質問する
  */
 async function handleAreaRegistration(event, userId, cityName) {
-    // ... (この関数は変更なし)
+    console.log(`ユーザー (${userId}) の地域登録処理: ${cityName}`);
+    try {
+        const apiKey = process.env.OPENWEATHERMAP_API_KEY;
+        if (!apiKey) throw new Error('OPENWEATHERMAP_API_KEY is not set.');
+        
+        const geoUrl = `http://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(cityName)},JP&limit=1&appid=${apiKey}`;
+        const geoResponse = await axios.get(geoUrl);
+        
+        if (!geoResponse.data || geoResponse.data.length === 0) {
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、その場所が見つけられへんかったわ…。もう一回、市区町村名だけで教えてくれるか？（例：豊島区）' });
+        }
+
+        const { lat, lon, local_names } = geoResponse.data[0];
+        const japaneseName = (local_names && local_names.ja) ? local_names.ja : cityName;
+
+        await pool.query(
+            'UPDATE users SET lat = $1, lon = $2, area_name = $3, conversation_state = $4 WHERE user_id = $5',
+            [lat, lon, japaneseName, 'waiting_for_departure_station', userId]
+        );
+
+        console.log(`ユーザー (${userId}) の地域を ${japaneseName} に設定しました。`);
+        const replyText = `${japaneseName}やな、了解やで！\n次は電車の運行状況を調べたいさかい、一番よう使う駅（出発駅）を教えてくれるか？（例：池袋）\n電車を使わへん場合は「なし」と入力してな。`;
+        return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
+
+    } catch (error) {
+        console.error('地域登録処理でエラー:', error);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、情報の取得で問題が起きたみたいや。ちょっと時間をおいてから、もう一回試してみてな。' });
+    }
 }
 
 /**
  * 出発駅の登録を処理する
  */
 async function handleDepartureStation(event, userId, stationName) {
-    // ... (この関数は変更なし)
+    if (stationName === 'なし') {
+        await pool.query("UPDATE users SET conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: '電車は使わへんのやな、了解や！\n最後にゴミの日を教えてな。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいに、まとめて教えてくれると助かるわ。'
+        });
+    }
+
+    console.log(`ユーザー (${userId}) の出発駅登録処理: ${stationName}`);
+    await pool.query(
+        "UPDATE users SET temp_departure_station = $1, conversation_state = 'waiting_for_arrival_station' WHERE user_id = $2",
+        [stationName.replace(/駅$/, ''), userId] // 「駅」を除いて保存
+    );
+    return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `${stationName}駅やな。ほな、職場とか学校の最寄り駅（到着駅）も教えてくれるか？（例：渋谷）`
+    });
 }
 
 /**
- * ★ [修正] 到着駅を受け取り、路線を検索。乗り換えも考慮する
+ * 到着駅を受け取り、路線を検索。乗り換えも考慮する
  */
 async function handleArrivalStation(event, userId, departureStation, arrivalStation) {
     console.log(`ユーザー (${userId}) の到着駅登録処理: ${arrivalStation}`);
     const arrivalStationClean = arrivalStation.replace(/駅$/, '');
     try {
-        // ★ 共通路線を検索するヘルパー関数を呼び出す
+        // 共通路線を検索するヘルパー関数を呼び出す
         const commonLines = await findCommonLines(departureStation, arrivalStationClean);
 
         if (commonLines.length > 0) {
-            // ★ 直通路線が見つかった場合
+            // 直通路線が見つかった場合
             console.log(`直通路線を発見: ${commonLines.join(', ')}`);
             await pool.query("UPDATE users SET temp_arrival_station = $1, conversation_state = 'waiting_for_line_selection' WHERE user_id = $2", [arrivalStationClean, userId]);
             return sendLineSelectionFlexMessage(event.replyToken, commonLines, `「${departureStation}」→「${arrivalStationClean}」の路線`);
         } else {
-            // ★ 直通路線がない場合、乗り換え駅を質問する
+            // 直通路線がない場合、乗り換え駅を質問する
             console.log('直通路線が見つかりません。乗り換え駅を質問します。');
             await pool.query("UPDATE users SET temp_arrival_station = $1, conversation_state = 'waiting_for_transfer_station' WHERE user_id = $2", [arrivalStationClean, userId]);
             return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、その2つの駅を直接結ぶ路線が見つからへんかったわ。\n乗り換えが必要みたいやな。一番よう使う乗り換え駅を1つだけ教えてくれるか？（例：池袋）' });
@@ -169,7 +232,7 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
 }
 
 /**
- * ★ [新規] 乗り換え駅を受け取り、複数区間の路線を検索する
+ * 乗り換え駅を受け取り、複数区間の路線を検索する
  */
 async function handleTransferStation(event, userId, departureStation, arrivalStation, transferStation) {
     console.log(`ユーザー (${userId}) の乗り換え駅登録処理: ${transferStation}`);
@@ -197,7 +260,7 @@ async function handleTransferStation(event, userId, departureStation, arrivalSta
 }
 
 /**
- * ★ [新規] 2駅間の共通路線を検索するヘルパー関数
+ * 2駅間の共通路線を検索するヘルパー関数
  */
 async function findCommonLines(station1, station2) {
     const [promise1, promise2] = await Promise.all([
@@ -236,7 +299,7 @@ async function findCommonLines(station1, station2) {
 }
 
 /**
- * ★ [新規] 路線選択のFlex Messageを送信する共通関数
+ * 路線選択のFlex Messageを送信する共通関数
  */
 async function sendLineSelectionFlexMessage(replyToken, lines, title) {
     const buttons = lines.map(line => ({
@@ -300,7 +363,42 @@ async function sendLineSelectionFlexMessage(replyToken, lines, title) {
  * 手動での路線登録を処理する（実在確認付き）
  */
 async function handleLineRegistrationManual(event, userId, text) {
-    // ... (この関数は変更なし)
+    const finishWords = ['完了', 'かんりょう', 'おわり', '終わり', 'ok', 'OK'];
+    
+    if (finishWords.includes(text)) {
+        const registeredLines = await pool.query('SELECT line_name FROM train_routes WHERE user_id = $1', [userId]);
+        if (registeredLines.rows.length === 0) {
+             return client.replyMessage(event.replyToken, { type: 'text', text: `路線が登録されてへんけど、これでええか？よければもう一回「完了」と送ってな。` });
+        }
+        const lineNames = registeredLines.rows.map(r => r.line_name).join('、');
+        await pool.query("UPDATE users SET conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: `【${lineNames}】やな、覚えたで！\n最後にゴミの日を教えてな。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいに、まとめて教えてくれると助かるわ。` });
+    }
+
+    try {
+        const lineName = text.replace(/線$/, '').trim() + '線';
+
+        // ★ 路線が実在するかAPIで確認
+        const validationResponse = await axios.get(`http://express.heartrails.com/api/json?method=getLines&name=${encodeURIComponent(lineName)}`);
+        if (validationResponse.data.response.error) {
+            return client.replyMessage(event.replyToken, {
+                type: 'text',
+                text: `すまんな、「${lineName}」っちゅう路線は見つからへんかったわ。もう一回、正しい名前で教えてくれるか？`
+            });
+        }
+
+        const check = await pool.query('SELECT * FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
+        if (check.rows.length > 0) {
+            return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineName}」はもう登録済みやで。他にはあるか？なければ「完了」と入力してな。` });
+        }
+        
+        await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineName}」を登録したで。他にはあるか？なければ「完了」と入力してな。` });
+
+    } catch (error) {
+        console.error('路線登録でエラー:', error);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、路線の登録で問題が起きたみたいや…。' });
+    }
 }
 
 
@@ -308,7 +406,55 @@ async function handleLineRegistrationManual(event, userId, text) {
  * ゴミの日登録を処理する
  */
 async function handleGarbageDayRegistration(event, userId, text) {
-    // ... (この関数は変更なし)
+    console.log(`ユーザー (${userId}) のゴミの日登録処理: ${text}`);
+    try {
+        await pool.query('DELETE FROM garbage_days WHERE user_id = $1', [userId]);
+
+        const dayMap = { '月': '月曜日', '火': '火曜日', '水': '水曜日', '木': '木曜日', '金': '金曜日', '土': '土曜日', '日': '日曜日' };
+        const registered = [];
+        const garbageDayRegex = /(.+?)(は|:|：)\s*([月火水木金土日、・\s]+)/g;
+        let match;
+
+        while ((match = garbageDayRegex.exec(text)) !== null) {
+            const garbageType = match[1].trim();
+            const daysPart = match[3];
+            
+            for (const char of daysPart) {
+                if (dayMap[char]) {
+                    const dayOfWeek = dayMap[char];
+                    await pool.query(
+                        'INSERT INTO garbage_days (user_id, garbage_type, day_of_week) VALUES ($1, $2, $3)',
+                        [userId, garbageType, dayOfWeek]
+                    );
+                    let regEntry = registered.find(r => r.type === garbageType);
+                    if (!regEntry) {
+                        regEntry = { type: garbageType, days: [] };
+                        registered.push(regEntry);
+                    }
+                    if (!regEntry.days.includes(dayOfWeek)) {
+                        regEntry.days.push(dayOfWeek);
+                    }
+                }
+            }
+        }
+        
+        if (registered.length === 0) {
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、うまく聞き取れへんかったわ。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいにもう一回教えてくれるか？' });
+        }
+
+        let confirmation = 'ゴミの日、覚えたで！\n';
+        registered.forEach(r => {
+            confirmation += `・${r.type}: ${r.days.join('、')}\n`;
+        });
+        confirmation += '\nこれで全部の設定が終わったで！これから毎日あんたをサポートするさかい、よろしくな！';
+
+        await pool.query("UPDATE users SET conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: confirmation });
+
+    } catch (error) {
+        console.error('ゴミの日登録でエラー:', error);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、ゴミの日の登録で問題が起きたみたいや…。' });
+    }
 }
 
 
@@ -316,7 +462,48 @@ async function handleGarbageDayRegistration(event, userId, text) {
  * Postbackイベント（ボタンクリック）を処理する
  */
 async function handlePostbackEvent(event, userId) {
-    // ... (この関数は変更なし)
+    const data = new URLSearchParams(event.postback.data);
+    const action = data.get('action');
+
+    // 路線ボタンのトグル（追加／削除）処理
+    if (action === 'toggle_line') {
+        const lineName = decodeURIComponent(data.get('line'));
+        
+        const check = await pool.query('SELECT * FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
+        if (check.rows.length > 0) {
+            await pool.query('DELETE FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
+            console.log(`ユーザー (${userId}) が路線を削除 (ボタン): ${lineName}`);
+        } else {
+            await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
+            console.log(`ユーザー (${userId}) が路線を追加 (ボタン): ${lineName}`);
+        }
+        return Promise.resolve(null);
+    }
+
+    // 手動追加モードへの移行
+    if (action === 'add_manually') {
+        await pool.query("UPDATE users SET conversation_state = 'waiting_for_lines_manual' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: '了解や。追加したい路線名を1つずつ入力してな。終わったら「完了」と教えてや。'
+        });
+    }
+
+    // 完了処理
+    if (action === 'finish_lines') {
+        const registeredLines = await pool.query('SELECT line_name FROM train_routes WHERE user_id = $1', [userId]);
+        if (registeredLines.rows.length === 0) {
+            return client.replyMessage(event.replyToken, {type: 'text', text: '路線が1つも選ばれてへんで！どれか1つは選んでな。'});
+        }
+        const lineNames = registeredLines.rows.map(r => r.line_name).join('、');
+        await pool.query("UPDATE users SET conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: `【${lineNames}】やな、覚えたで！\n最後にゴミの日を教えてな。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいに、まとめて教えてくれると助かるわ。`
+        });
+    }
+
+    return Promise.resolve(null);
 }
 
 
@@ -324,28 +511,155 @@ async function handlePostbackEvent(event, userId) {
  * リマインダー登録を処理する
  */
 async function handleReminder(event, userId, text) {
-    // ... (この関数は変更なし)
+    console.log(`ユーザー (${userId}) のリマインダー処理: ${text}`);
+    try {
+        const now = new Date();
+        const zonedNow = utcToZonedTime(now, JST);
+        const results = chrono.ja.parse(text, zonedNow, { forwardDate: true });
+
+        if (results.length === 0) {
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'いつリマインドすればええんや？\n「明日の15時に会議」とか「30分後に買い物」みたいに、日時や時間を具体的に教えてな！' });
+        }
+
+        const reminderDateTime = results[0].start.date();
+        const task = text.substring(0, results[0].index).trim() || text.substring(results[0].index + results[0].text.length).trim();
+
+        if (!task) {
+            return client.replyMessage(event.replyToken, { type: 'text', text: '何をリマインドすればええんや？\n「明日の15時に会議」みたいに、やることも一緒に教えてな！' });
+        }
+
+        const reminderTimeUtc = zonedTimeToUtc(reminderDateTime, JST);
+        await pool.query('INSERT INTO reminders (user_id, task, reminder_time, created_at) VALUES ($1, $2, $3, NOW())', [userId, task, reminderTimeUtc]);
+        
+        const formattedDateTime = format(reminderDateTime, 'M月d日 HH:mm', { timeZone: JST });
+        const replyText = `【リマインダー登録】\nわかったで！\n\n内容：${task}\n日時：${formattedDateTime}\n\n時間になったら教えるさかいな！`;
+
+        return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
+
+    } catch (error) {
+        console.error('リマインダーの処理中にエラーが発生しました:', error);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、リマインダーの登録で問題が起きたみたいや。もう一回試してみてくれるか？' });
+    }
 }
 
 /**
  * 定期実行するリマインダー通知機能
  */
 async function checkAndSendReminders() {
-    // ... (この関数は変更なし)
+    try {
+        const nowUtc = new Date();
+        const res = await pool.query("SELECT id, user_id, task, reminder_time FROM reminders WHERE reminder_time <= $1 AND notified = false", [nowUtc]);
+
+        if (res.rows.length === 0) return;
+        
+        console.log(`${res.rows.length}件のリマインダーを送信します。`);
+        for (const reminder of res.rows) {
+            const zonedReminderTime = utcToZonedTime(reminder.reminder_time, JST);
+            const formattedTime = format(zonedReminderTime, 'M月d日 HH:mm', { timeZone: JST });
+            const message = { type: 'text', text: `【リマインダーの時間やで！】\n\n内容：${reminder.task}\n設定日時：${formattedTime}\n\n忘れたらあかんで〜！` };
+            await client.pushMessage(reminder.user_id, message);
+            await pool.query("UPDATE reminders SET notified = true WHERE id = $1", [reminder.id]);
+            console.log(`リマインダー (ID: ${reminder.id}) をユーザー (${reminder.user_id}) に送信しました。`);
+        }
+    } catch (error) {
+        if (error.code === '42P01') { 
+            console.log('checkAndSendReminders: remindersテーブルがまだ作成されていません。');
+        } else {
+            console.error('リマインダーの送信中にエラーが発生しました:', error);
+        }
+    }
 }
 
 /**
  * DBのテーブルと列を網羅的にチェックし、なければ作成する関数
  */
 async function setupDatabase() {
-    // ... (この関数は変更なし)
+    console.log('データベースのスキーマをチェック・セットアップしています...');
+    const client = await pool.connect();
+    try {
+        // --- 1. 'users' テーブル ---
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        const usersColumns = {
+            conversation_state: 'TEXT',
+            lat: 'NUMERIC',
+            lon: 'NUMERIC',
+            area_name: 'TEXT',
+            temp_departure_station: 'TEXT',
+            temp_arrival_station: 'TEXT'
+        };
+        for (const [column, type] of Object.entries(usersColumns)) {
+            const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
+            if (res.rows.length === 0) {
+                await client.query(`ALTER TABLE users ADD COLUMN ${column} ${type}`);
+                console.log(`'users'テーブルに列 "${column}" を追加しました。`);
+            }
+        }
+
+        // --- 2. 'reminders' テーブル ---
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                task TEXT NOT NULL,
+                reminder_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                notified BOOLEAN DEFAULT false
+            );
+        `);
+
+        // --- 3. 'train_routes' テーブル ---
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS train_routes (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                line_name TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // --- 4. 'garbage_days' テーブル ---
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS garbage_days (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                garbage_type TEXT NOT NULL,
+                day_of_week TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        console.log('データベースのセットアップチェックが完了しました。');
+
+    } catch (err) {
+        console.error('データベースのセットアップ中に致命的なエラーが発生しました:', err);
+    } finally {
+        client.release();
+    }
 }
 
 //======================================================================
 // ★ アプリケーションを安全な順序で起動する
 //======================================================================
 async function main() {
-    // ... (この関数は変更なし)
+    // 1. まずデータベースのセットアップが完了するのを待つ
+    await setupDatabase();
+
+    // 2. データベースの準備ができてから、cronジョブをスケジュールする
+    cron.schedule('* * * * *', () => {
+        checkAndSendReminders();
+    });
+    console.log('リマインダーチェック用のcronジョブをスケジュールしました。');
+
+    // 3. サーバーを起動する
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+        console.log(`listening on ${port}`);
+    });
 }
 
 // アプリケーションを起動
