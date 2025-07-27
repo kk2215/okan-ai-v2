@@ -145,7 +145,7 @@ async function handleFollowEvent(event, userId) {
 }
 
 /**
- * [修正] 地域登録後、出発駅を質問する
+ * 地域登録後、出発駅を質問する
  */
 async function handleAreaRegistration(event, userId, cityName) {
     console.log(`ユーザー (${userId}) の地域登録処理: ${cityName}`);
@@ -163,7 +163,6 @@ async function handleAreaRegistration(event, userId, cityName) {
         const { lat, lon, local_names } = geoResponse.data[0];
         const japaneseName = (local_names && local_names.ja) ? local_names.ja : cityName;
 
-        // ★ 次は出発駅の登録へ
         await pool.query(
             'UPDATE users SET lat = $1, lon = $2, area_name = $3, conversation_state = $4 WHERE user_id = $5',
             [lat, lon, japaneseName, 'waiting_for_departure_station', userId]
@@ -180,7 +179,7 @@ async function handleAreaRegistration(event, userId, cityName) {
 }
 
 /**
- * ★ [修正] 出発駅の登録を処理する
+ * 出発駅の登録を処理する
  */
 async function handleDepartureStation(event, userId, stationName) {
     if (stationName === 'なし') {
@@ -194,7 +193,7 @@ async function handleDepartureStation(event, userId, stationName) {
     console.log(`ユーザー (${userId}) の出発駅登録処理: ${stationName}`);
     await pool.query(
         "UPDATE users SET temp_departure_station = $1, conversation_state = 'waiting_for_arrival_station' WHERE user_id = $2",
-        [stationName, userId]
+        [stationName.replace(/駅$/, ''), userId] // 「駅」を除いて保存
     );
     return client.replyMessage(event.replyToken, {
         type: 'text',
@@ -207,13 +206,15 @@ async function handleDepartureStation(event, userId, stationName) {
  */
 async function handleArrivalStation(event, userId, departureStation, arrivalStation) {
     console.log(`ユーザー (${userId}) の到着駅登録処理: ${arrivalStation}`);
+    const arrivalStationClean = arrivalStation.replace(/駅$/, '');
     try {
-        const response = await axios.get(`http://express.heartrails.com/api/json?method=getLines&station1=${encodeURIComponent(departureStation)}&station2=${encodeURIComponent(arrivalStation)}`);
+        const response = await axios.get(`http://express.heartrails.com/api/json?method=getLines&station1=${encodeURIComponent(departureStation)}&station2=${encodeURIComponent(arrivalStationClean)}`);
         const lines = response.data.response.line;
 
         if (!lines) {
-            await pool.query("UPDATE users SET conversation_state = 'waiting_for_lines_manual' WHERE user_id = $1", [userId]);
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、その2つの駅を結ぶ路線が見つからへんかったわ。\nお手数やけど、使う路線名を1つずつ入力して、終わったら「完了」と教えてな。' });
+            // ★ 路線が見つからない場合、駅名の再入力を促す
+            await pool.query("UPDATE users SET conversation_state = 'waiting_for_departure_station' WHERE user_id = $1", [userId]);
+            return client.replyMessage(event.replyToken, { type: 'text', text: `すまんな、「${departureStation}駅」から「${arrivalStationClean}駅」への路線が見つからへんかったわ。\n駅の正式名称が違うかもしれん。もう一回、出発駅から教えてくれるか？` });
         }
 
         const lineArray = Array.isArray(lines) ? lines : [lines];
@@ -232,7 +233,7 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
         
         buttons.push({
             type: 'button',
-            action: { type: 'postback', label: '手動で追加する', data: 'action=add_manually' },
+            action: { type: 'postback', label: 'この中にない（手動入力）', data: 'action=add_manually' },
             style: 'secondary',
             margin: 'md',
             height: 'sm',
@@ -254,7 +255,7 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
                 header: {
                     type: 'box',
                     layout: 'vertical',
-                    contents: [{ type: 'text', text: '利用する路線を選択', weight: 'bold', size: 'lg' }]
+                    contents: [{ type: 'text', text: `「${departureStation}」→「${arrivalStationClean}」の路線`, weight: 'bold', size: 'lg' }]
                 },
                 body: {
                     type: 'box',
@@ -273,7 +274,7 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
         };
 
         // 状態を更新して、ボタン操作を待つ
-        await pool.query("UPDATE users SET temp_arrival_station = $1, conversation_state = 'waiting_for_line_selection' WHERE user_id = $2", [arrivalStation, userId]);
+        await pool.query("UPDATE users SET temp_arrival_station = $1, conversation_state = 'waiting_for_line_selection' WHERE user_id = $2", [arrivalStationClean, userId]);
         return client.replyMessage(event.replyToken, flexMessage);
 
     } catch (error) {
@@ -317,10 +318,58 @@ async function handleLineRegistrationManual(event, userId, text) {
 
 
 /**
- * ゴミの日登録を処理する
+ * ★ [修正] ゴミの日登録を処理する
  */
 async function handleGarbageDayRegistration(event, userId, text) {
-    // ... (この関数は変更なし)
+    console.log(`ユーザー (${userId}) のゴミの日登録処理: ${text}`);
+    try {
+        await pool.query('DELETE FROM garbage_days WHERE user_id = $1', [userId]);
+
+        const dayMap = { '月': '月曜日', '火': '火曜日', '水': '水曜日', '木': '木曜日', '金': '金曜日', '土': '土曜日', '日': '日曜日' };
+        const registered = [];
+        const garbageDayRegex = /(.+?)(は|:|：)\s*([月火水木金土日、・\s]+)/g;
+        let match;
+
+        while ((match = garbageDayRegex.exec(text)) !== null) {
+            const garbageType = match[1].trim();
+            const daysPart = match[3];
+            
+            for (const char of daysPart) {
+                if (dayMap[char]) {
+                    const dayOfWeek = dayMap[char];
+                    await pool.query(
+                        'INSERT INTO garbage_days (user_id, garbage_type, day_of_week) VALUES ($1, $2, $3)',
+                        [userId, garbageType, dayOfWeek]
+                    );
+                    let regEntry = registered.find(r => r.type === garbageType);
+                    if (!regEntry) {
+                        regEntry = { type: garbageType, days: [] };
+                        registered.push(regEntry);
+                    }
+                    if (!regEntry.days.includes(dayOfWeek)) {
+                        regEntry.days.push(dayOfWeek);
+                    }
+                }
+            }
+        }
+        
+        if (registered.length === 0) {
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、うまく聞き取れへんかったわ。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいにもう一回教えてくれるか？' });
+        }
+
+        let confirmation = 'ゴミの日、覚えたで！\n';
+        registered.forEach(r => {
+            confirmation += `・${r.type}: ${r.days.join('、')}\n`;
+        });
+        confirmation += '\nこれで全部の設定が終わったで！これから毎日あんたをサポートするさかい、よろしくな！';
+
+        await pool.query("UPDATE users SET conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: confirmation });
+
+    } catch (error) {
+        console.error('ゴミの日登録でエラー:', error);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、ゴミの日の登録で問題が起きたみたいや…。' });
+    }
 }
 
 
@@ -336,17 +385,14 @@ async function handlePostbackEvent(event, userId) {
         const lineName = decodeURIComponent(data.get('line'));
         
         const check = await pool.query('SELECT * FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
-        let replyText;
         if (check.rows.length > 0) {
             await pool.query('DELETE FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
             console.log(`ユーザー (${userId}) が路線を削除 (ボタン): ${lineName}`);
-            replyText = `「${lineName}」を取り消したで。`;
         } else {
             await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
             console.log(`ユーザー (${userId}) が路線を追加 (ボタン): ${lineName}`);
-            replyText = `「${lineName}」を追加したで！`;
         }
-        await client.pushMessage(userId, { type: 'text', text: replyText });
+        // ★ ユーザーへの返信はしない（UIが煩雑になるため）
         return Promise.resolve(null);
     }
 
@@ -392,7 +438,7 @@ async function checkAndSendReminders() {
 }
 
 /**
- * [修正] DBのテーブルと列を網羅的にチェックし、なければ作成する関数
+ * DBのテーブルと列を網羅的にチェックし、なければ作成する関数
  */
 async function setupDatabase() {
     console.log('データベースのスキーマをチェック・セットアップしています...');
@@ -405,7 +451,6 @@ async function setupDatabase() {
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // ★ 駅名の一時保存カラムを再追加
         const usersColumns = {
             conversation_state: 'TEXT',
             lat: 'NUMERIC',
