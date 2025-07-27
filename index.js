@@ -227,7 +227,6 @@ async function checkAndSendReminders() {
             console.log(`リマインダー (ID: ${reminder.id}) をユーザー (${reminder.user_id}) に送信しました。`);
         }
     } catch (error) {
-        // テーブルが存在しないエラーは起動時に修復されるので、ログレベルを下げても良い
         if (error.code === '42P01') { 
             console.log('checkAndSendReminders: remindersテーブルがまだ作成されていません。');
         } else {
@@ -236,23 +235,8 @@ async function checkAndSendReminders() {
     }
 }
 
-// node-cronで毎分リマインダーチェックを実行
-cron.schedule('* * * * *', () => {
-  checkAndSendReminders();
-});
-
-//======================================================================
-// ★ アプリ起動時の処理 & DB自動修復
-//======================================================================
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-    console.log(`listening on ${port}`);
-    // ★★★ 起動時にデータベースのテーブル構造をチェック・修正する ★★★
-    setupDatabase();
-});
-
 /**
- * [変更] 起動時にDBのテーブルと列を網羅的にチェックし、なければ作成する関数
+ * DBのテーブルと列を網羅的にチェックし、なければ作成する関数
  */
 async function setupDatabase() {
     console.log('データベースのスキーマをチェック・セットアップしています...');
@@ -311,3 +295,29 @@ async function setupDatabase() {
         client.release();
     }
 }
+
+//======================================================================
+// ★ [変更] アプリケーションを安全な順序で起動する
+//======================================================================
+async function main() {
+    // 1. まずデータベースのセットアップが完了するのを待つ
+    await setupDatabase();
+
+    // 2. データベースの準備ができてから、cronジョブをスケジュールする
+    cron.schedule('* * * * *', () => {
+        checkAndSendReminders();
+    });
+    console.log('リマインダーチェック用のcronジョブをスケジュールしました。');
+
+    // 3. サーバーを起動する
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+        console.log(`listening on ${port}`);
+    });
+}
+
+// アプリケーションを起動
+main().catch(err => {
+    console.error('アプリケーションの起動に失敗しました:', err);
+    process.exit(1);
+});
