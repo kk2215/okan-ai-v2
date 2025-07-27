@@ -111,7 +111,7 @@ async function handleEvent(event) {
 //======================================================================
 
 /**
- * [新規追加] 友だち追加 (フォロー) イベントを処理する
+ * 友だち追加 (フォロー) イベントを処理する
  */
 async function handleFollowEvent(event, userId) {
     const userCheck = await pool.query('SELECT * FROM users WHERE user_id = $1', [userId]);
@@ -133,7 +133,7 @@ async function handleFollowEvent(event, userId) {
 }
 
 /**
- * [変更] 地域登録を処理する (状態に基づいて呼び出される)
+ * 地域登録を処理する (状態に基づいて呼び出される)
  */
 async function handleAreaRegistration(event, userId, cityName) {
     console.log(`ユーザー (${userId}) の地域登録処理: ${cityName}`);
@@ -227,7 +227,12 @@ async function checkAndSendReminders() {
             console.log(`リマインダー (ID: ${reminder.id}) をユーザー (${reminder.user_id}) に送信しました。`);
         }
     } catch (error) {
-        console.error('リマインダーの送信中にエラーが発生しました:', error);
+        // テーブルが存在しないエラーは起動時に修復されるので、ログレベルを下げても良い
+        if (error.code === '42P01') { 
+            console.log('checkAndSendReminders: remindersテーブルがまだ作成されていません。');
+        } else {
+            console.error('リマインダーの送信中にエラーが発生しました:', error);
+        }
     }
 }
 
@@ -247,35 +252,60 @@ app.listen(port, () => {
 });
 
 /**
- * [新規追加] 起動時にDBのテーブルをチェックし、必要な列がなければ追加する関数
+ * [変更] 起動時にDBのテーブルと列を網羅的にチェックし、なければ作成する関数
  */
 async function setupDatabase() {
-    console.log('データベースのスキーマをチェックしています...');
+    console.log('データベースのスキーマをチェック・セットアップしています...');
     const client = await pool.connect();
     try {
-        // 'users' テーブルに 'conversation_state' 列が存在するか確認
-        const res = await client.query(`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='users' AND column_name='conversation_state'
+        // --- 1. 'users' テーブルのチェックと作成 ---
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
         `);
-        
-        if (res.rows.length === 0) {
-            // 列が存在しない場合のみ、追加する
-            console.log('列 "conversation_state" が見つかりません。usersテーブルに追加します...');
-            await client.query('ALTER TABLE users ADD COLUMN conversation_state TEXT');
-            console.log('列 "conversation_state" の追加に成功しました。');
-        } else {
-            // 列が既に存在する場合
-            console.log('列 "conversation_state" は既に存在します。変更は不要です。');
+        console.log("'users' テーブルの存在を確認しました。");
+
+        // --- 2. 'users' テーブルの必須カラムを一つずつチェックして追加 ---
+        const usersColumns = {
+            conversation_state: 'TEXT',
+            lat: 'NUMERIC',
+            lon: 'NUMERIC',
+            area_name: 'TEXT'
+        };
+
+        for (const [column, type] of Object.entries(usersColumns)) {
+            const res = await client.query(`
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name='users' AND column_name=$1
+            `, [column]);
+            if (res.rows.length === 0) {
+                console.log(`'users'テーブルに列 "${column}" が見つかりません。追加します...`);
+                await client.query(`ALTER TABLE users ADD COLUMN ${column} ${type}`);
+                console.log(`列 "${column}" の追加に成功しました。`);
+            }
         }
+         console.log("'users' テーブルのカラムを正常にチェックしました。");
+
+
+        // --- 3. 'reminders' テーブルのチェックと作成 ---
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                task TEXT NOT NULL,
+                reminder_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                notified BOOLEAN DEFAULT false
+            );
+        `);
+        console.log("'reminders' テーブルの存在を確認しました。");
+
+        console.log('データベースのセットアップチェックが完了しました。');
+
     } catch (err) {
-        // usersテーブル自体がない場合などのエラーを考慮
-        if (err.code === '42P01') { // 42P01はテーブルが存在しない場合のエラーコード
-             console.error('エラー: "users" テーブルが見つかりません。先にテーブルを作成してください。');
-        } else {
-             console.error('データベースのセットアップ中にエラーが発生しました:', err);
-        }
+        console.error('データベースのセットアップ中に致命的なエラーが発生しました:', err);
     } finally {
         // 必ず接続をプールに返す
         client.release();
