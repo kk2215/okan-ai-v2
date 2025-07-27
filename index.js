@@ -9,7 +9,8 @@ const axios =require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 const chrono = require('chrono-node');
-const { zonedTimeToUtc, utcToZonedTime, format } = require('date-fns-tz');
+// ★ [修正] date-fns-tz のインポート方法を変更
+const dateFnsTz = require('date-fns-tz');
 
 // LINEとデータベースの接続情報を設定
 const config = {
@@ -304,7 +305,7 @@ async function handleTransferStation(event, userId, text) {
 
 
 /**
- * ★ [修正] 2駅間の共通路線を検索するヘルパー関数
+ * 2駅間の共通路線を検索するヘルパー関数
  */
 async function findCommonLines(station1, station2) {
     const [promise1, promise2] = await Promise.all([
@@ -315,7 +316,7 @@ async function findCommonLines(station1, station2) {
     const response1 = promise1.data.response;
     const response2 = promise2.data.response;
 
-    // ★ APIからのエラーレスポンスをより厳密にチェック
+    // APIからのエラーレスポンスをより厳密にチェック
     if (response1.error || response2.error) {
         let errorMessage = '';
         if (response1.error) errorMessage += `「${station1}」っちゅう駅が見つからへんかったわ。\n`;
@@ -560,13 +561,14 @@ async function handlePostbackEvent(event, userId) {
 
 
 /**
- * リマインダー登録を処理する
+ * ★ [修正] リマインダー登録を処理する
  */
 async function handleReminder(event, userId, text) {
     console.log(`ユーザー (${userId}) のリマインダー処理: ${text}`);
     try {
         const now = new Date();
-        const zonedNow = utcToZonedTime(now, JST);
+        // ★ 呼び出し方を修正
+        const zonedNow = dateFnsTz.utcToZonedTime(now, JST);
         const results = chrono.ja.parse(text, zonedNow, { forwardDate: true });
 
         if (results.length === 0) {
@@ -580,10 +582,12 @@ async function handleReminder(event, userId, text) {
             return client.replyMessage(event.replyToken, { type: 'text', text: '何をリマインドすればええんや？\n「明日の15時に会議」みたいに、やることも一緒に教えてな！' });
         }
 
-        const reminderTimeUtc = zonedTimeToUtc(reminderDateTime, JST);
+        // ★ 呼び出し方を修正
+        const reminderTimeUtc = dateFnsTz.zonedTimeToUtc(reminderDateTime, JST);
         await pool.query('INSERT INTO reminders (user_id, task, reminder_time, created_at) VALUES ($1, $2, $3, NOW())', [userId, task, reminderTimeUtc]);
         
-        const formattedDateTime = format(reminderDateTime, 'M月d日 HH:mm', { timeZone: JST });
+        // ★ 呼び出し方を修正
+        const formattedDateTime = dateFnsTz.format(reminderDateTime, 'M月d日 HH:mm', { timeZone: JST });
         const replyText = `【リマインダー登録】\nわかったで！\n\n内容：${task}\n日時：${formattedDateTime}\n\n時間になったら教えるさかいな！`;
 
         return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
@@ -595,7 +599,7 @@ async function handleReminder(event, userId, text) {
 }
 
 /**
- * 定期実行するリマインダー通知機能
+ * ★ [修正] 定期実行するリマインダー通知機能
  */
 async function checkAndSendReminders() {
     try {
@@ -606,8 +610,9 @@ async function checkAndSendReminders() {
         
         console.log(`${res.rows.length}件のリマインダーを送信します。`);
         for (const reminder of res.rows) {
-            const zonedReminderTime = utcToZonedTime(reminder.reminder_time, JST);
-            const formattedTime = format(zonedReminderTime, 'M月d日 HH:mm', { timeZone: JST });
+            // ★ 呼び出し方を修正
+            const zonedReminderTime = dateFnsTz.utcToZonedTime(reminder.reminder_time, JST);
+            const formattedTime = dateFnsTz.format(zonedReminderTime, 'M月d日 HH:mm', { timeZone: JST });
             const message = { type: 'text', text: `【リマインダーの時間やで！】\n\n内容：${reminder.task}\n設定日時：${formattedTime}\n\n忘れたらあかんで〜！` };
             await client.pushMessage(reminder.user_id, message);
             await pool.query("UPDATE reminders SET notified = true WHERE id = $1", [reminder.id]);
