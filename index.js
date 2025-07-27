@@ -231,13 +231,15 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
         // ★ 路線情報を配列に変換し、共通路線を抽出
         const getLinesFromArray = (stations) => {
             const lines = new Set();
-            stations.forEach(s => {
-                if (Array.isArray(s.line)) {
-                    s.line.forEach(l => lines.add(l));
-                } else {
-                    lines.add(s.line);
-                }
-            });
+            if (stations) {
+                stations.forEach(s => {
+                    if (Array.isArray(s.line)) {
+                        s.line.forEach(l => l && lines.add(l.trim()));
+                    } else if (s.line) {
+                        lines.add(s.line.trim());
+                    }
+                });
+            }
             return Array.from(lines);
         };
 
@@ -317,7 +319,7 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
 }
 
 /**
- * 手動での路線登録を処理する
+ * ★ [修正] 手動での路線登録を処理する（実在確認付き）
  */
 async function handleLineRegistrationManual(event, userId, text) {
     const finishWords = ['完了', 'かんりょう', 'おわり', '終わり', 'ok', 'OK'];
@@ -334,6 +336,16 @@ async function handleLineRegistrationManual(event, userId, text) {
 
     try {
         const lineName = text.replace(/線$/, '').trim() + '線';
+
+        // ★ 路線が実在するかAPIで確認
+        const validationResponse = await axios.get(`http://express.heartrails.com/api/json?method=getLines&name=${encodeURIComponent(lineName)}`);
+        if (validationResponse.data.response.error) {
+            return client.replyMessage(event.replyToken, {
+                type: 'text',
+                text: `すまんな、「${lineName}」っちゅう路線は見つからへんかったわ。もう一回、正しい名前で教えてくれるか？`
+            });
+        }
+
         const check = await pool.query('SELECT * FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
         if (check.rows.length > 0) {
             return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineName}」はもう登録済みやで。他にはあるか？なければ「完了」と入力してな。` });
