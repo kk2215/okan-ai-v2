@@ -9,7 +9,6 @@ const axios =require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 const chrono = require('chrono-node');
-// ★ [修正] date-fns-tz のインポート方法を変更
 const dateFnsTz = require('date-fns-tz');
 
 // LINEとデータベースの接続情報を設定
@@ -171,13 +170,16 @@ async function handleAreaRegistration(event, userId, cityName) {
         } else {
             // 候補が複数の場合は選択肢を提示
             const buttons = locations.map(loc => {
-                const displayName = `${loc.local_names.ja}, ${loc.state}`;
+                // ★ 県名(state)がない場合を考慮し、安全に表示名を作成
+                const stateName = loc.state || '';
+                const displayName = `${loc.local_names.ja}, ${stateName}`;
                 return {
                     type: 'button',
                     action: {
                         type: 'postback',
                         label: displayName,
-                        data: `action=select_area&lat=${loc.lat}&lon=${loc.lon}&name=${encodeURIComponent(loc.local_names.ja)}`
+                        // ★ postbackデータに県名も追加
+                        data: `action=select_area&lat=${loc.lat}&lon=${loc.lon}&name=${encodeURIComponent(loc.local_names.ja)}&state=${encodeURIComponent(stateName)}`
                     },
                     style: 'primary',
                     margin: 'sm',
@@ -218,19 +220,22 @@ async function handleAreaRegistration(event, userId, cityName) {
 }
 
 /**
- * ★ [新規] 地域情報をDBに登録し、次のステップに進む共通関数
+ * ★ [修正] 地域情報をDBに登録し、確認メッセージと共に次のステップに進む共通関数
  */
 async function registerAreaAndProceed(replyToken, userId, location) {
     const { lat, lon } = location;
-    const japaneseName = location.local_names.ja || location.name;
+    // APIからの直接のオブジェクトと、postbackからのオブジェクトの両方に対応
+    const japaneseName = location.name || (location.local_names && location.local_names.ja);
+    const stateName = location.state || '';
 
     await pool.query(
         'UPDATE users SET lat = $1, lon = $2, area_name = $3, conversation_state = $4 WHERE user_id = $5',
         [lat, lon, japaneseName, 'waiting_for_departure_station', userId]
     );
 
-    console.log(`ユーザー (${userId}) の地域を ${japaneseName} に設定しました。`);
-    const replyText = `${japaneseName}やな、了解やで！\n次は電車の運行状況を調べたいさかい、一番よう使う駅（出発駅）を教えてくれるか？（例：池袋）\n電車を使わへん場合は「なし」と入力してな。`;
+    console.log(`ユーザー (${userId}) の地域を ${stateName} ${japaneseName} に設定しました。`);
+    // ★ 確認メッセージを追加
+    const replyText = `${stateName ? stateName + 'の' : ''}${japaneseName}やな、了解やで！\n次は電車の運行状況を調べたいさかい、一番よう使う駅（出発駅）を教えてくれるか？（例：池袋）\n電車を使わへん場合は「なし」と入力してな。`;
     return client.replyMessage(replyToken, { type: 'text', text: replyText });
 }
 
@@ -331,23 +336,27 @@ async function handleTransferStation(event, userId, text) {
 
     // --- 新しい乗り換え駅が追加された場合 ---
     const newTransferStation = text.replace(/駅$/, '');
-    const lastStation = routeStations[routeStations.length - 2]; // 最後から2番目（現在の乗り換え元）
-    const finalDestination = routeStations[routeStations.length - 1]; // 最終目的地
+    // ★ ルートの最後（最終目的地）の前に、新しい乗り換え駅を追加する
+    const finalDestination = routeStations.pop(); // 一旦、最終目的地を取り出す
+    const lastStation = routeStations[routeStations.length - 1]; // 現在のルートの最後の駅（乗り換え元）
     
     try {
         // 新しい乗り換え元から新しい乗り換え先への路線をチェック
         const checkLines1 = await findCommonLines(lastStation, newTransferStation);
         if (checkLines1.length === 0) {
+            routeStations.push(finalDestination); // 取り出した目的地を元に戻す
             return client.replyMessage(event.replyToken, { type: 'text', text: `すまん、「${lastStation}」から「${newTransferStation}」への路線が見つからへんかったわ。駅名を確認してもう一回教えてくれるか？` });
         }
         // 新しい乗り換え先から最終目的地への路線をチェック
         const checkLines2 = await findCommonLines(newTransferStation, finalDestination);
         if (checkLines2.length === 0) {
+            routeStations.push(finalDestination); // 取り出した目的地を元に戻す
             return client.replyMessage(event.replyToken, { type: 'text', text: `すまん、「${newTransferStation}」から「${finalDestination}」への路線が見つからへんかったわ。駅名を確認してもう一回教えてくれるか？` });
         }
 
-        // ★ ルートの最後に新しい乗り換え駅を追加（最終目的地の前に追加）
-        routeStations.splice(routeStations.length - 1, 0, newTransferStation);
+        // ★ 新しい乗り換え駅と、最終目的地を順番通りに追加
+        routeStations.push(newTransferStation);
+        routeStations.push(finalDestination);
         await pool.query('UPDATE users SET temp_route_stations = $1 WHERE user_id = $2', [JSON.stringify(routeStations), userId]);
 
         console.log(`乗り換え駅を追加。現在のルート: ${routeStations.join(' → ')}`);
@@ -575,8 +584,9 @@ async function handlePostbackEvent(event, userId) {
         const lat = parseFloat(data.get('lat'));
         const lon = parseFloat(data.get('lon'));
         const name = decodeURIComponent(data.get('name'));
+        const state = decodeURIComponent(data.get('state'));
         
-        const location = { lat, lon, name, local_names: { ja: name } }; // 共通関数に渡すためのオブジェクトを作成
+        const location = { lat, lon, name, state };
         return registerAreaAndProceed(event.replyToken, userId, location);
     }
 
