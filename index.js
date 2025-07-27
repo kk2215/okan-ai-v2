@@ -6,7 +6,6 @@ const express = require('express');
 const { Client, middleware } = require('@line/bot-sdk');
 const axios = require('axios');
 const cron = require('node-cron');
-const chrono = require('chrono-node');
 const { Pool } = require('pg');
 const cheerio = require('cheerio');
 const { formatInTimeZone } = require('date-fns-tz');
