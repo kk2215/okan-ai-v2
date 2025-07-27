@@ -208,18 +208,50 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
     console.log(`ユーザー (${userId}) の到着駅登録処理: ${arrivalStation}`);
     const arrivalStationClean = arrivalStation.replace(/駅$/, '');
     try {
-        const response = await axios.get(`http://express.heartrails.com/api/json?method=getLines&station1=${encodeURIComponent(departureStation)}&station2=${encodeURIComponent(arrivalStationClean)}`);
-        const lines = response.data.response.line;
+        // ★ 各駅の路線情報を個別に取得
+        const [departurePromise, arrivalPromise] = await Promise.all([
+            axios.get(`http://express.heartrails.com/api/json?method=getStations&name=${encodeURIComponent(departureStation)}`),
+            axios.get(`http://express.heartrails.com/api/json?method=getStations&name=${encodeURIComponent(arrivalStationClean)}`)
+        ]);
 
-        if (!lines) {
-            // ★ 路線が見つからない場合、駅名の再入力を促す
+        const departureStations = departurePromise.data.response.station;
+        const arrivalStations = arrivalPromise.data.response.station;
+
+        // 駅が見つからない場合のエラーハンドリング
+        if (!departureStations || !arrivalStations) {
+            let errorMessage = 'すまんな、駅が見つけられへんかったわ。\n';
+            if (!departureStations) errorMessage += `「${departureStation}」っちゅう駅、ほんまにあるか？\n`;
+            if (!arrivalStations) errorMessage += `「${arrivalStationClean}」っちゅう駅、ほんまにあるか？\n`;
+            errorMessage += 'もう一回、出発駅から教えてくれるか？';
+            
             await pool.query("UPDATE users SET conversation_state = 'waiting_for_departure_station' WHERE user_id = $1", [userId]);
-            return client.replyMessage(event.replyToken, { type: 'text', text: `すまんな、「${departureStation}駅」から「${arrivalStationClean}駅」への路線が見つからへんかったわ。\n駅の正式名称が違うかもしれん。もう一回、出発駅から教えてくれるか？` });
+            return client.replyMessage(event.replyToken, { type: 'text', text: errorMessage });
         }
 
-        const lineArray = Array.isArray(lines) ? lines : [lines];
+        // ★ 路線情報を配列に変換し、共通路線を抽出
+        const getLinesFromArray = (stations) => {
+            const lines = new Set();
+            stations.forEach(s => {
+                if (Array.isArray(s.line)) {
+                    s.line.forEach(l => lines.add(l));
+                } else {
+                    lines.add(s.line);
+                }
+            });
+            return Array.from(lines);
+        };
 
-        const buttons = lineArray.map(line => ({
+        const departureLines = getLinesFromArray(departureStations);
+        const arrivalLines = getLinesFromArray(arrivalStations);
+        const commonLines = departureLines.filter(line => arrivalLines.includes(line));
+
+        if (commonLines.length === 0) {
+            // ★ 共通路線がない場合、手動入力へ
+            await pool.query("UPDATE users SET conversation_state = 'waiting_for_lines_manual' WHERE user_id = $1", [userId]);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、その2つの駅を直接結ぶ路線が見つからへんかったわ。\n乗り換えが必要な場合は、使う路線名を1つずつ入力して、終わったら「完了」と教えてな。' });
+        }
+
+        const buttons = commonLines.map(line => ({
             type: 'button',
             action: {
                 type: 'postback',
@@ -318,7 +350,7 @@ async function handleLineRegistrationManual(event, userId, text) {
 
 
 /**
- * ★ [修正] ゴミの日登録を処理する
+ * ゴミの日登録を処理する
  */
 async function handleGarbageDayRegistration(event, userId, text) {
     console.log(`ユーザー (${userId}) のゴミの日登録処理: ${text}`);
@@ -374,7 +406,7 @@ async function handleGarbageDayRegistration(event, userId, text) {
 
 
 /**
- * ★ [修正] Postbackイベント（ボタンクリック）を処理する
+ * Postbackイベント（ボタンクリック）を処理する
  */
 async function handlePostbackEvent(event, userId) {
     const data = new URLSearchParams(event.postback.data);
@@ -392,7 +424,6 @@ async function handlePostbackEvent(event, userId) {
             await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
             console.log(`ユーザー (${userId}) が路線を追加 (ボタン): ${lineName}`);
         }
-        // ★ ユーザーへの返信はしない（UIが煩雑になるため）
         return Promise.resolve(null);
     }
 
