@@ -309,7 +309,6 @@ async function checkAndSendReminders() {
 
 // 定期実行のシミュレーション（開発用）
 // 本番環境ではRenderのCron Jobなど外部のスケジューラを使用してください。
-setInterval(checkAndSendReminders, 60000); // 60秒ごとに実行
 app.listen(PORT, async () => {
   await setupDatabase();
   console.log(`おかんAI、ポート${PORT}で待機中...`);
