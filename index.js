@@ -151,8 +151,6 @@ async function handleAreaRegistration(event, userId, cityName) {
             const { lat, lon, local_names } = response.data[0];
             const japaneseName = (local_names && local_names.ja) ? local_names.ja : cityName;
 
-            // ★ 次の設問がある場合は、その状態に更新する
-            // 今回はここで完了とする
             const nextState = 'setup_completed'; 
             await pool.query(
                 'UPDATE users SET lat = $1, lon = $2, area_name = $3, conversation_state = $4 WHERE user_id = $5',
@@ -161,9 +159,7 @@ async function handleAreaRegistration(event, userId, cityName) {
 
             console.log(`ユーザー (${userId}) の地域を ${japaneseName} に設定しました。`);
             
-            // ★ 次の設問への案内メッセージ
             const replyText = `${japaneseName}やな、了解やで！\nこれで初期設定は終わりや。これからよろしくな！\n\n「1時間後に会議 リマインド」みたいに話しかけてみてな。`;
-            // (例) const replyText = `${japaneseName}やな、了解やで！\n次は、毎朝何時に天気とかを通知したらええか教えてくれる？ (例: 8:00)`;
 
             return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
         } else {
@@ -240,7 +236,48 @@ cron.schedule('* * * * *', () => {
   checkAndSendReminders();
 });
 
+//======================================================================
+// ★ アプリ起動時の処理 & DB自動修復
+//======================================================================
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`listening on ${port}`);
+    // ★★★ 起動時にデータベースのテーブル構造をチェック・修正する ★★★
+    setupDatabase();
 });
+
+/**
+ * [新規追加] 起動時にDBのテーブルをチェックし、必要な列がなければ追加する関数
+ */
+async function setupDatabase() {
+    console.log('データベースのスキーマをチェックしています...');
+    const client = await pool.connect();
+    try {
+        // 'users' テーブルに 'conversation_state' 列が存在するか確認
+        const res = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='users' AND column_name='conversation_state'
+        `);
+        
+        if (res.rows.length === 0) {
+            // 列が存在しない場合のみ、追加する
+            console.log('列 "conversation_state" が見つかりません。usersテーブルに追加します...');
+            await client.query('ALTER TABLE users ADD COLUMN conversation_state TEXT');
+            console.log('列 "conversation_state" の追加に成功しました。');
+        } else {
+            // 列が既に存在する場合
+            console.log('列 "conversation_state" は既に存在します。変更は不要です。');
+        }
+    } catch (err) {
+        // usersテーブル自体がない場合などのエラーを考慮
+        if (err.code === '42P01') { // 42P01はテーブルが存在しない場合のエラーコード
+             console.error('エラー: "users" テーブルが見つかりません。先にテーブルを作成してください。');
+        } else {
+             console.error('データベースのセットアップ中にエラーが発生しました:', err);
+        }
+    } finally {
+        // 必ず接続をプールに返す
+        client.release();
+    }
+}
