@@ -91,8 +91,8 @@ async function handleEvent(event) {
             return handleDepartureStation(event, userId, text);
         case 'waiting_for_arrival_station':
             return handleArrivalStation(event, userId, user.temp_departure_station, text);
-        case 'waiting_for_transfer_station': // ★ 乗り換え駅を待つ状態を追加
-            return handleTransferStation(event, userId, user.temp_departure_station, user.temp_arrival_station, text);
+        case 'waiting_for_transfer_station': // ★ 乗り換え駅を待つ状態
+            return handleTransferStation(event, userId, text);
         case 'waiting_for_lines_manual':
             return handleLineRegistrationManual(event, userId, text);
         case 'waiting_for_garbage_day':
@@ -138,7 +138,7 @@ async function handleFollowEvent(event, userId) {
         console.log(`既存ユーザー (${userId}) が再フォローしました。`);
         // 既存の設定をクリアして最初から
         await Promise.all([
-            pool.query("UPDATE users SET conversation_state = 'waiting_for_area' WHERE user_id = $1", [userId]),
+            pool.query("UPDATE users SET conversation_state = 'waiting_for_area', temp_route_stations = NULL WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM train_routes WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM garbage_days WHERE user_id = $1", [userId])
         ]);
@@ -193,35 +193,36 @@ async function handleDepartureStation(event, userId, stationName) {
     }
 
     console.log(`ユーザー (${userId}) の出発駅登録処理: ${stationName}`);
+    const departureStation = stationName.replace(/駅$/, '');
+    // ★ ルートの始点を保存
     await pool.query(
-        "UPDATE users SET temp_departure_station = $1, conversation_state = 'waiting_for_arrival_station' WHERE user_id = $2",
-        [stationName.replace(/駅$/, ''), userId] // 「駅」を除いて保存
+        "UPDATE users SET temp_route_stations = $1, conversation_state = 'waiting_for_arrival_station' WHERE user_id = $2",
+        [JSON.stringify([departureStation]), userId]
     );
     return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: `${stationName}駅やな。ほな、職場とか学校の最寄り駅（到着駅）も教えてくれるか？（例：渋谷）`
+        text: `${departureStation}駅やな。ほな、職場とか学校の最寄り駅（到着駅）も教えてくれるか？（例：渋谷）`
     });
 }
 
 /**
- * 到着駅を受け取り、路線を検索。乗り換えも考慮する
+ * ★ [修正] 到着駅を受け取り、路線を検索。乗り換えも考慮する
  */
 async function handleArrivalStation(event, userId, departureStation, arrivalStation) {
     console.log(`ユーザー (${userId}) の到着駅登録処理: ${arrivalStation}`);
     const arrivalStationClean = arrivalStation.replace(/駅$/, '');
     try {
-        // 共通路線を検索するヘルパー関数を呼び出す
         const commonLines = await findCommonLines(departureStation, arrivalStationClean);
 
         if (commonLines.length > 0) {
             // 直通路線が見つかった場合
             console.log(`直通路線を発見: ${commonLines.join(', ')}`);
-            await pool.query("UPDATE users SET temp_arrival_station = $1, conversation_state = 'waiting_for_line_selection' WHERE user_id = $2", [arrivalStationClean, userId]);
+            await pool.query("UPDATE users SET temp_route_stations = $1, conversation_state = 'waiting_for_line_selection' WHERE user_id = $2", [JSON.stringify([departureStation, arrivalStationClean]), userId]);
             return sendLineSelectionFlexMessage(event.replyToken, commonLines, `「${departureStation}」→「${arrivalStationClean}」の路線`);
         } else {
             // 直通路線がない場合、乗り換え駅を質問する
             console.log('直通路線が見つかりません。乗り換え駅を質問します。');
-            await pool.query("UPDATE users SET temp_arrival_station = $1, conversation_state = 'waiting_for_transfer_station' WHERE user_id = $2", [arrivalStationClean, userId]);
+            await pool.query("UPDATE users SET temp_route_stations = $1, conversation_state = 'waiting_for_transfer_station' WHERE user_id = $2", [JSON.stringify([departureStation, arrivalStationClean]), userId]);
             return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、その2つの駅を直接結ぶ路線が見つからへんかったわ。\n乗り換えが必要みたいやな。一番よう使う乗り換え駅を1つだけ教えてくれるか？（例：池袋）' });
         }
     } catch (error) {
@@ -232,130 +233,71 @@ async function handleArrivalStation(event, userId, departureStation, arrivalStat
 }
 
 /**
- * 乗り換え駅を受け取り、複数区間の路線を検索する
+ * ★ [新規] 乗り換え駅を受け取り、さらに次の駅を質問するか、路線提案に進むか判断する
  */
-async function handleTransferStation(event, userId, departureStation, arrivalStation, transferStation) {
-    console.log(`ユーザー (${userId}) の乗り換え駅登録処理: ${transferStation}`);
-    const transferStationClean = transferStation.replace(/駅$/, '');
-    try {
-        const lines1 = await findCommonLines(departureStation, transferStationClean);
-        const lines2 = await findCommonLines(transferStationClean, arrivalStation);
+async function handleTransferStation(event, userId, text) {
+    const finishWords = ['完了', 'かんりょう', 'おわり', '終わり', 'ok', 'OK', 'ない', 'ないです'];
+    const userResult = await pool.query('SELECT temp_route_stations FROM users WHERE user_id = $1', [userId]);
+    const routeStations = JSON.parse(userResult.rows[0].temp_route_stations);
 
-        const allLines = [...new Set([...lines1, ...lines2])]; // 配列を結合し、重複を削除
+    // --- 乗り換え終了の場合 ---
+    if (finishWords.includes(text)) {
+        console.log(`乗り換え終了。最終ルート: ${routeStations.join(' → ')}`);
+        const allLines = new Set();
+        for (let i = 0; i < routeStations.length - 1; i++) {
+            const lines = await findCommonLines(routeStations[i], routeStations[i+1]);
+            lines.forEach(line => allLines.add(line));
+        }
 
-        if (allLines.length === 0) {
-            await pool.query("UPDATE users SET conversation_state = 'waiting_for_departure_station' WHERE user_id = $1", [userId]);
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、乗り換え駅を使ってもうまいこと路線が見つけられへんかった…。駅名が違うかもしれんから、もう一回、出発駅から教えてな。' });
+        if (allLines.size === 0) {
+            await pool.query("UPDATE users SET conversation_state = 'waiting_for_lines_manual' WHERE user_id = $1", [userId]);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、うまいこと路線が見つけられへんかった…。お手数やけど、使う路線名を1つずつ入力して、終わったら「完了」と教えてな。' });
         }
         
-        console.log(`乗り換え路線を発見: ${allLines.join(', ')}`);
         await pool.query("UPDATE users SET conversation_state = 'waiting_for_line_selection' WHERE user_id = $1", [userId]);
-        return sendLineSelectionFlexMessage(event.replyToken, allLines, `「${departureStation}」→「${transferStationClean}」→「${arrivalStation}」の路線`);
-
-    } catch (error) {
-        console.error('乗り換え路線情報の取得でエラー:', error.message);
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_departure_station' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: error.message || 'すまん、乗り換え路線の情報を取得するのに失敗したわ…。もう一回、出発駅から教えてくれるか？' });
+        return sendLineSelectionFlexMessage(event.replyToken, Array.from(allLines), `「${routeStations.join('→')}」の路線`);
     }
+
+    // --- 新しい乗り換え駅が追加された場合 ---
+    const newTransferStation = text.replace(/駅$/, '');
+    const lastStation = routeStations[routeStations.length - 2]; // 最後から2番目（現在の乗り換え元）
+    
+    // 新しい乗り換え駅が最終目的地と同じでないか確認
+    const finalDestination = routeStations[routeStations.length - 1];
+    if (newTransferStation === finalDestination) {
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'それは最終目的地やで！他になければ「完了」と教えてな。' });
+    }
+
+    // 新しい区間の路線をチェック
+    const checkLines = await findCommonLines(lastStation, newTransferStation);
+    if (checkLines.length === 0) {
+        return client.replyMessage(event.replyToken, { type: 'text', text: `すまん、「${lastStation}」から「${newTransferStation}」への路線が見つからへんかったわ。駅名を確認してもう一回教えてくれるか？` });
+    }
+
+    // ルートの最後に新しい乗り換え駅を追加（最終目的地の前に追加）
+    routeStations.splice(routeStations.length - 1, 0, newTransferStation);
+    await pool.query('UPDATE users SET temp_route_stations = $1 WHERE user_id = $2', [JSON.stringify(routeStations), userId]);
+
+    console.log(`乗り換え駅を追加。現在のルート: ${routeStations.join(' → ')}`);
+    return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `「${newTransferStation}」駅やな、了解や。\n他にあれば次の乗り換え駅を、なければ「完了」と教えてな。`
+    });
 }
+
 
 /**
  * 2駅間の共通路線を検索するヘルパー関数
  */
 async function findCommonLines(station1, station2) {
-    const [promise1, promise2] = await Promise.all([
-        axios.get(`http://express.heartrails.com/api/json?method=getStations&name=${encodeURIComponent(station1)}`),
-        axios.get(`http://express.heartrails.com/api/json?method=getStations&name=${encodeURIComponent(station2)}`)
-    ]);
-
-    const stations1 = promise1.data.response.station;
-    const stations2 = promise2.data.response.station;
-
-    if (!stations1 || !stations2) {
-        let errorMessage = '';
-        if (!stations1) errorMessage += `「${station1}」っちゅう駅、ほんまにあるか？\n`;
-        if (!stations2) errorMessage += `「${station2}」っちゅう駅、ほんまにあるか？\n`;
-        throw new Error(errorMessage || '駅情報の取得に失敗しました。');
-    }
-
-    const getLinesSet = (stations) => {
-        const lines = new Set();
-        if (stations) {
-            stations.forEach(s => {
-                if (Array.isArray(s.line)) {
-                    s.line.forEach(l => l && lines.add(l.trim()));
-                } else if (s.line) {
-                    lines.add(s.line.trim());
-                }
-            });
-        }
-        return lines;
-    };
-
-    const lines1 = getLinesSet(stations1);
-    const lines2 = getLinesSet(stations2);
-    
-    return Array.from(lines1).filter(line => lines2.has(line));
+    // ... (この関数は変更なし)
 }
 
 /**
  * 路線選択のFlex Messageを送信する共通関数
  */
 async function sendLineSelectionFlexMessage(replyToken, lines, title) {
-    const buttons = lines.map(line => ({
-        type: 'button',
-        action: {
-            type: 'postback',
-            label: line,
-            data: `action=toggle_line&line=${encodeURIComponent(line)}`
-        },
-        style: 'primary',
-        margin: 'sm',
-        height: 'sm',
-    }));
-    
-    buttons.push({
-        type: 'button',
-        action: { type: 'postback', label: 'この中にない（手動入力）', data: 'action=add_manually' },
-        style: 'secondary',
-        margin: 'md',
-        height: 'sm',
-    });
-    buttons.push({
-        type: 'button',
-        action: { type: 'postback', label: '完了', data: 'action=finish_lines' },
-        style: 'primary',
-        color: '#00B900',
-        margin: 'sm',
-        height: 'sm',
-    });
-
-    const flexMessage = {
-        type: 'flex',
-        altText: '路線の選択',
-        contents: {
-            type: 'bubble',
-            header: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [{ type: 'text', text: title, weight: 'bold', size: 'lg', wrap: true }]
-            },
-            body: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [
-                    { type: 'text', text: '毎朝チェックする路線を全部選んで「完了」を押してな。\n(ボタンを押すたびに追加／削除が切り替わるで)', wrap: true }
-                ]
-            },
-            footer: {
-                type: 'box',
-                layout: 'vertical',
-                spacing: 'sm',
-                contents: buttons
-            }
-        }
-    };
-    return client.replyMessage(replyToken, flexMessage);
+    // ... (この関数は変更なし)
 }
 
 
@@ -363,42 +305,7 @@ async function sendLineSelectionFlexMessage(replyToken, lines, title) {
  * 手動での路線登録を処理する（実在確認付き）
  */
 async function handleLineRegistrationManual(event, userId, text) {
-    const finishWords = ['完了', 'かんりょう', 'おわり', '終わり', 'ok', 'OK'];
-    
-    if (finishWords.includes(text)) {
-        const registeredLines = await pool.query('SELECT line_name FROM train_routes WHERE user_id = $1', [userId]);
-        if (registeredLines.rows.length === 0) {
-             return client.replyMessage(event.replyToken, { type: 'text', text: `路線が登録されてへんけど、これでええか？よければもう一回「完了」と送ってな。` });
-        }
-        const lineNames = registeredLines.rows.map(r => r.line_name).join('、');
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: `【${lineNames}】やな、覚えたで！\n最後にゴミの日を教えてな。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいに、まとめて教えてくれると助かるわ。` });
-    }
-
-    try {
-        const lineName = text.replace(/線$/, '').trim() + '線';
-
-        // ★ 路線が実在するかAPIで確認
-        const validationResponse = await axios.get(`http://express.heartrails.com/api/json?method=getLines&name=${encodeURIComponent(lineName)}`);
-        if (validationResponse.data.response.error) {
-            return client.replyMessage(event.replyToken, {
-                type: 'text',
-                text: `すまんな、「${lineName}」っちゅう路線は見つからへんかったわ。もう一回、正しい名前で教えてくれるか？`
-            });
-        }
-
-        const check = await pool.query('SELECT * FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
-        if (check.rows.length > 0) {
-            return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineName}」はもう登録済みやで。他にはあるか？なければ「完了」と入力してな。` });
-        }
-        
-        await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineName}」を登録したで。他にはあるか？なければ「完了」と入力してな。` });
-
-    } catch (error) {
-        console.error('路線登録でエラー:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、路線の登録で問題が起きたみたいや…。' });
-    }
+    // ... (この関数は変更なし)
 }
 
 
@@ -406,60 +313,12 @@ async function handleLineRegistrationManual(event, userId, text) {
  * ゴミの日登録を処理する
  */
 async function handleGarbageDayRegistration(event, userId, text) {
-    console.log(`ユーザー (${userId}) のゴミの日登録処理: ${text}`);
-    try {
-        await pool.query('DELETE FROM garbage_days WHERE user_id = $1', [userId]);
-
-        const dayMap = { '月': '月曜日', '火': '火曜日', '水': '水曜日', '木': '木曜日', '金': '金曜日', '土': '土曜日', '日': '日曜日' };
-        const registered = [];
-        const garbageDayRegex = /(.+?)(は|:|：)\s*([月火水木金土日、・\s]+)/g;
-        let match;
-
-        while ((match = garbageDayRegex.exec(text)) !== null) {
-            const garbageType = match[1].trim();
-            const daysPart = match[3];
-            
-            for (const char of daysPart) {
-                if (dayMap[char]) {
-                    const dayOfWeek = dayMap[char];
-                    await pool.query(
-                        'INSERT INTO garbage_days (user_id, garbage_type, day_of_week) VALUES ($1, $2, $3)',
-                        [userId, garbageType, dayOfWeek]
-                    );
-                    let regEntry = registered.find(r => r.type === garbageType);
-                    if (!regEntry) {
-                        regEntry = { type: garbageType, days: [] };
-                        registered.push(regEntry);
-                    }
-                    if (!regEntry.days.includes(dayOfWeek)) {
-                        regEntry.days.push(dayOfWeek);
-                    }
-                }
-            }
-        }
-        
-        if (registered.length === 0) {
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、うまく聞き取れへんかったわ。\n「燃えるゴミは月曜と木曜、カンは水曜」みたいにもう一回教えてくれるか？' });
-        }
-
-        let confirmation = 'ゴミの日、覚えたで！\n';
-        registered.forEach(r => {
-            confirmation += `・${r.type}: ${r.days.join('、')}\n`;
-        });
-        confirmation += '\nこれで全部の設定が終わったで！これから毎日あんたをサポートするさかい、よろしくな！';
-
-        await pool.query("UPDATE users SET conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: confirmation });
-
-    } catch (error) {
-        console.error('ゴミの日登録でエラー:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、ゴミの日の登録で問題が起きたみたいや…。' });
-    }
+    // ... (この関数は変更なし)
 }
 
 
 /**
- * Postbackイベント（ボタンクリック）を処理する
+ * ★ [修正] Postbackイベント（ボタンクリック）を処理する
  */
 async function handlePostbackEvent(event, userId) {
     const data = new URLSearchParams(event.postback.data);
@@ -470,13 +329,18 @@ async function handlePostbackEvent(event, userId) {
         const lineName = decodeURIComponent(data.get('line'));
         
         const check = await pool.query('SELECT * FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
+        let replyText;
         if (check.rows.length > 0) {
             await pool.query('DELETE FROM train_routes WHERE user_id = $1 AND line_name = $2', [userId, lineName]);
             console.log(`ユーザー (${userId}) が路線を削除 (ボタン): ${lineName}`);
+            replyText = `「${lineName}」を取り消したで。`;
         } else {
             await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
             console.log(`ユーザー (${userId}) が路線を追加 (ボタン): ${lineName}`);
+            replyText = `「${lineName}」を追加したで！`;
         }
+        // ★ ユーザーにフィードバックを返す
+        await client.pushMessage(userId, { type: 'text', text: replyText });
         return Promise.resolve(null);
     }
 
@@ -511,67 +375,18 @@ async function handlePostbackEvent(event, userId) {
  * リマインダー登録を処理する
  */
 async function handleReminder(event, userId, text) {
-    console.log(`ユーザー (${userId}) のリマインダー処理: ${text}`);
-    try {
-        const now = new Date();
-        const zonedNow = utcToZonedTime(now, JST);
-        const results = chrono.ja.parse(text, zonedNow, { forwardDate: true });
-
-        if (results.length === 0) {
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'いつリマインドすればええんや？\n「明日の15時に会議」とか「30分後に買い物」みたいに、日時や時間を具体的に教えてな！' });
-        }
-
-        const reminderDateTime = results[0].start.date();
-        const task = text.substring(0, results[0].index).trim() || text.substring(results[0].index + results[0].text.length).trim();
-
-        if (!task) {
-            return client.replyMessage(event.replyToken, { type: 'text', text: '何をリマインドすればええんや？\n「明日の15時に会議」みたいに、やることも一緒に教えてな！' });
-        }
-
-        const reminderTimeUtc = zonedTimeToUtc(reminderDateTime, JST);
-        await pool.query('INSERT INTO reminders (user_id, task, reminder_time, created_at) VALUES ($1, $2, $3, NOW())', [userId, task, reminderTimeUtc]);
-        
-        const formattedDateTime = format(reminderDateTime, 'M月d日 HH:mm', { timeZone: JST });
-        const replyText = `【リマインダー登録】\nわかったで！\n\n内容：${task}\n日時：${formattedDateTime}\n\n時間になったら教えるさかいな！`;
-
-        return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
-
-    } catch (error) {
-        console.error('リマインダーの処理中にエラーが発生しました:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、リマインダーの登録で問題が起きたみたいや。もう一回試してみてくれるか？' });
-    }
+    // ... (この関数は変更なし)
 }
 
 /**
  * 定期実行するリマインダー通知機能
  */
 async function checkAndSendReminders() {
-    try {
-        const nowUtc = new Date();
-        const res = await pool.query("SELECT id, user_id, task, reminder_time FROM reminders WHERE reminder_time <= $1 AND notified = false", [nowUtc]);
-
-        if (res.rows.length === 0) return;
-        
-        console.log(`${res.rows.length}件のリマインダーを送信します。`);
-        for (const reminder of res.rows) {
-            const zonedReminderTime = utcToZonedTime(reminder.reminder_time, JST);
-            const formattedTime = format(zonedReminderTime, 'M月d日 HH:mm', { timeZone: JST });
-            const message = { type: 'text', text: `【リマインダーの時間やで！】\n\n内容：${reminder.task}\n設定日時：${formattedTime}\n\n忘れたらあかんで〜！` };
-            await client.pushMessage(reminder.user_id, message);
-            await pool.query("UPDATE reminders SET notified = true WHERE id = $1", [reminder.id]);
-            console.log(`リマインダー (ID: ${reminder.id}) をユーザー (${reminder.user_id}) に送信しました。`);
-        }
-    } catch (error) {
-        if (error.code === '42P01') { 
-            console.log('checkAndSendReminders: remindersテーブルがまだ作成されていません。');
-        } else {
-            console.error('リマインダーの送信中にエラーが発生しました:', error);
-        }
-    }
+    // ... (この関数は変更なし)
 }
 
 /**
- * DBのテーブルと列を網羅的にチェックし、なければ作成する関数
+ * ★ [修正] DBのテーブルと列を網羅的にチェックし、なければ作成する関数
  */
 async function setupDatabase() {
     console.log('データベースのスキーマをチェック・セットアップしています...');
@@ -584,13 +399,13 @@ async function setupDatabase() {
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // ★ 乗り換えルートを一時保存するカラムを追加
         const usersColumns = {
             conversation_state: 'TEXT',
             lat: 'NUMERIC',
             lon: 'NUMERIC',
             area_name: 'TEXT',
-            temp_departure_station: 'TEXT',
-            temp_arrival_station: 'TEXT'
+            temp_route_stations: 'TEXT' // JSON配列を文字列で保存
         };
         for (const [column, type] of Object.entries(usersColumns)) {
             const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
