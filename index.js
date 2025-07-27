@@ -10,6 +10,8 @@ const chrono = require('chrono-node');
 const { Pool } = require('pg');
 const cheerio = require('cheerio');
 const { formatInTimeZone } = require('date-fns-tz');
+const chrono = require('chrono-node');
+const { zonedTimeToUtc, utcToZonedTime, format } = require('date-fns-tz');
 
 // ----------------------------------------------------------------
 // 2. 設定
@@ -21,6 +23,7 @@ const config = {
 const OPEN_WEATHER_API_KEY = process.env.OPEN_WEATHER_API_KEY;
 
 const client = new Client(config);
+const JST = 'Asia/Tokyo'; // 日本のタイムゾーン
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -180,39 +183,63 @@ const handleEvent = async (event) => {
   } else {
     // 設定完了後の会話処理
 
-    // ▼▼▼ このifブロックを丸ごと置き換えてください ▼▼▼
-    if (userText.includes('リマインド') || userText.includes('思い出させて')) {
-      // まず、文章から「〇〇ってリマインドして」のような命令部分を取り除く
-      let textToParse = userText;
-      const triggerWords = ["ってリマインドして", "と思い出させて", "ってリマインド", "と思い出させ"];
-      triggerWords.forEach(word => {
-        if (textToParse.endsWith(word)) {
-          textToParse = textToParse.slice(0, -word.length);
+    if (text.includes('リマインド') || text.includes('りまいんど')) {
+        try {
+            // 現在時刻を日本時間で取得
+            const now = new Date();
+            const zonedNow = utcToZonedTime(now, JST);
+
+            // chrono-nodeを使ってテキストから日時情報を解析
+            // 日本語の解析を優先し、未来の日時を優先的に解釈する設定
+            const results = chrono.ja.parse(text, zonedNow, { forwardDate: true });
+
+            // 日時情報が見つからない場合
+            if (results.length === 0) {
+                return client.replyMessage(event.replyToken, {
+                    type: 'text',
+                    text: 'いつリマインドすればええんや？\n「明日の15時に会議」とか「30分後に買い物」みたいに、日時や時間を具体的に教えてな！'
+                });
+            }
+
+            // 解析結果から日時とタスク内容を取得
+            const reminderDateTime = results[0].start.date();
+            const task = text.substring(0, results[0].index).trim() || text.substring(results[0].index + results[0].text.length).trim();
+
+            // タスク内容が空の場合のフォールバック
+            if (!task) {
+                return client.replyMessage(event.replyToken, {
+                    type: 'text',
+                    text: '何をリマインドすればええんや？\n「明日の15時に会議」みたいに、やることも一緒に教えてな！'
+                });
+            }
+
+            // データベースに保存するためにUTC（協定世界時）に変換
+            const reminderTimeUtc = zonedTimeToUtc(reminderDateTime, JST);
+
+            // データベースにリマインダーを保存
+            await pool.query(
+                'INSERT INTO reminders (user_id, task, reminder_time, created_at) VALUES ($1, $2, $3, NOW())',
+                [userId, task, reminderTimeUtc]
+            );
+
+            // ユーザーに確認メッセージを送信
+            // 日本時間でフォーマットして表示
+            const formattedDateTime = format(reminderDateTime, 'M月d日 HH:mm', { timeZone: JST });
+            const replyText = `【リマインダー登録】\nわかったで！\n\n内容：${task}\n日時：${formattedDateTime}\n\n時間になったら教えるさかいな！`;
+
+            return client.replyMessage(event.replyToken, {
+                type: 'text',
+                text: replyText
+            });
+
+        } catch (error) {
+            console.error('リマインダーの処理中にエラーが発生しました:', error);
+            return client.replyMessage(event.replyToken, {
+                type: 'text',
+                text: 'すまんな、リマインダーの登録で問題が起きたみたいや。もう一回試してみてくれるか？'
+            });
         }
-      });
-      
-      // 日本の現在時刻を基準点として設定
-      const japanTimeZone = 'Asia/Tokyo';
-      const nowInJapan = new Date(); // new Date()はUTC基準だが、chronoはこれを正しく扱える
-
-      // 残った文章（「明日の15時に歯医者」など）から、日時を解析する
-      const results = chrono.ja.parse(textToParse, nowInJapan, { forwardDate: true });
-
-      if (results.length > 0) {
-        const reminderDate = results[0].start.date();
-        // 解析された日時部分を、さらに文章から取り除いて、純粋なタスク内容を抽出する
-        const task = textToParse.replace(results[0].text, '').trim().replace(/^[にでをは、。]/, '').trim();
-
-        if (task) {
-          user.reminders.push({ date: reminderDate.toISOString(), task });
-          await updateUser(userId, user);
-          const formattedDate = formatInTimeZone(reminderDate, japanTimeZone, 'yyyy/MM/dd HH:mm');
-          return client.replyMessage(event.replyToken, { type: 'text', text: `あいよ！\n${formattedDate}に「${task}」やね。覚えとく！` });
-        }
-      }
     }
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
     if (userText.includes('ご飯') || userText.includes('ごはん')) {
       return client.replyMessage(event.replyToken, getRecipe());
     }
@@ -240,6 +267,50 @@ app.post('/webhook', middleware(config), (req, res) => {
     });
 });
 app.get('/', (req, res) => res.send('Okan AI is running!'));
+// =================================================================
+// ★ 定期実行するリマインダー通知機能
+// =================================================================
+// この関数をRenderのCron Jobなどで定期的に（例: 1分ごとに）実行する
+async function checkAndSendReminders() {
+    console.log('リマインダーのチェックを開始します...');
+    try {
+        // 現在時刻(UTC)に達した、まだ通知されていないリマインダーを取得
+        const nowUtc = new Date();
+        const res = await pool.query(
+            "SELECT id, user_id, task, reminder_time FROM reminders WHERE reminder_time <= $1 AND notified = false",
+            [nowUtc]
+        );
+
+        if (res.rows.length === 0) {
+            console.log('通知するリマインダーはありません。');
+            return;
+        }
+
+        // 取得した各リマインダーについて通知を送信
+        for (const reminder of res.rows) {
+            const zonedReminderTime = utcToZonedTime(reminder.reminder_time, JST);
+            const formattedTime = format(zonedReminderTime, 'M月d日 HH:mm', { timeZone: JST });
+            
+            const message = {
+                type: 'text',
+                text: `【リマインダーの時間やで！】\n\n内容：${reminder.task}\n設定日時：${formattedTime}\n\n忘れたらあかんで〜！`
+            };
+
+            await client.pushMessage(reminder.user_id, message);
+
+            // 通知済みフラグを立てる
+            await pool.query("UPDATE reminders SET notified = true WHERE id = $1", [reminder.id]);
+            console.log(`リマインダー (ID: ${reminder.id}) をユーザー (ID: ${reminder.user_id}) に送信しました。`);
+        }
+
+    } catch (error) {
+        console.error('リマインダーの送信中にエラーが発生しました:', error);
+    }
+}
+
+// 定期実行のシミュレーション（開発用）
+// 本番環境ではRenderのCron Jobなど外部のスケジューラを使用してください。
+setInterval(checkAndSendReminders, 60000); // 60秒ごとに実行
 app.listen(PORT, async () => {
   await setupDatabase();
   console.log(`おかんAI、ポート${PORT}で待機中...`);
