@@ -10,6 +10,7 @@ const cheerio = require('cheerio');
 const cron = require('node-cron');
 const chrono = require('chrono-node');
 const { utcToZonedTime, zonedTimeToUtc, format } = require('date-fns-tz');
+const puppeteer = require('puppeteer');
 
 // LINEとデータベースの接続情報を設定
 const config = {
@@ -138,7 +139,7 @@ async function handleFollowEvent(event, userId) {
         console.log(`既存ユーザー (${userId}) が再フォローしました。`);
         // 既存の設定をクリアして最初から
         await Promise.all([
-            pool.query("UPDATE users SET conversation_state = 'waiting_for_area', temp_departure_station = NULL WHERE user_id = $1", [userId]),
+            pool.query("UPDATE users SET conversation_state = 'waiting_for_area', temp_departure_station = NULL, last_notified_date = NULL WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM train_routes WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM garbage_days WHERE user_id = $1", [userId])
         ]);
@@ -344,26 +345,35 @@ async function handleArrivalStation(event, userId, arrivalStation) {
  */
 async function findRoutesFromYahoo(from, to) {
     const url = `https://transit.yahoo.co.jp/search/result?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const { data } = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36' }
+    const browser = await puppeteer.launch({ 
+        args: ['--no-sandbox', '--disable-setuid-sandbox'] // Renderで動かすための重要なおまじない
     });
-    const $ = cheerio.load(data);
-    const routes = [];
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'networkidle2' });
 
-    $('#srline .route-summary').each((i, el) => {
-        if (i >= 3) return; // 上位3ルートまで
-        const lines = new Set();
-        $(el).find('.transport .line').each((j, lineEl) => {
-            const lineName = $(lineEl).text().trim().replace(/［有料］$/, ''); // [有料]などを削除
-            if (lineName) {
-                lines.add(lineName);
-            }
+    // 検索結果がなかった場合のハンドリング
+    const noResult = await page.$('.error-sub');
+    if (noResult) {
+        await browser.close();
+        return [];
+    }
+    
+    const routes = await page.evaluate(() => {
+        const routeSummaries = Array.from(document.querySelectorAll('#srline .route-summary')).slice(0, 3);
+        return routeSummaries.map(summary => {
+            const lines = new Set();
+            summary.querySelectorAll('.transport .line').forEach(lineEl => {
+                const lineName = lineEl.textContent.trim().replace(/［有料］$/, '');
+                if (lineName) {
+                    lines.add(lineName);
+                }
+            });
+            return Array.from(lines);
         });
-        if (lines.size > 0) {
-            routes.push(Array.from(lines));
-        }
     });
-    return routes;
+
+    await browser.close();
+    return routes.filter(route => route.length > 0);
 }
 
 
@@ -618,7 +628,8 @@ async function setupDatabase() {
             area_name: 'TEXT',
             temp_departure_station: 'TEXT',
             notification_time: 'TIME',
-            notification_off_days: 'TEXT'
+            notification_off_days: 'TEXT',
+            last_notified_date: 'DATE' // ★ 追加
         };
         for (const [column, type] of Object.entries(usersColumns)) {
             const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
