@@ -10,7 +10,6 @@ const cheerio = require('cheerio');
 const cron = require('node-cron');
 const chrono = require('chrono-node');
 const { utcToZonedTime, zonedTimeToUtc, format } = require('date-fns-tz');
-const puppeteer = require('puppeteer');
 
 // LINEとデータベースの接続情報を設定
 const config = {
@@ -88,10 +87,6 @@ async function handleEvent(event) {
     switch (state) {
         case 'waiting_for_area':
             return handleAreaRegistration(event, userId, text);
-        case 'waiting_for_departure_station':
-            return handleDepartureStation(event, userId, text);
-        case 'waiting_for_arrival_station':
-            return handleArrivalStation(event, userId, text);
         case 'waiting_for_notification_time':
             return handleNotificationTime(event, userId, text);
         case 'waiting_for_off_days':
@@ -107,11 +102,14 @@ async function handleEvent(event) {
     if (text.includes('リマインド') || text.includes('りまいんど')) {
         return handleReminder(event, userId, text);
     }
+    if (text.includes('今日の晩ごはん') || text.includes('お腹すいた')) {
+        return handleDinnerRequest(userId);
+    }
     
     // どの条件にも合致しない場合、簡単な応答を返す
     return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: 'なんや？\n「リマインド」とか「ご飯」とか、何か用事があったら言うてな。'
+        text: 'なんや？\n「リマインド」とか「今日の晩ごはん」とか、何か用事があったら言うてな。'
     });
 }
 
@@ -139,7 +137,7 @@ async function handleFollowEvent(event, userId) {
         console.log(`既存ユーザー (${userId}) が再フォローしました。`);
         // 既存の設定をクリアして最初から
         await Promise.all([
-            pool.query("UPDATE users SET conversation_state = 'waiting_for_area', temp_departure_station = NULL, last_notified_date = NULL WHERE user_id = $1", [userId]),
+            pool.query("UPDATE users SET conversation_state = 'waiting_for_area', last_notified_date = NULL, cooking_support_enabled = false WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM train_routes WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM garbage_days WHERE user_id = $1", [userId])
         ]);
@@ -240,140 +238,12 @@ async function registerAreaAndProceed(replyToken, userId, location) {
 
     await pool.query(
         'UPDATE users SET lat = $1, lon = $2, area_name = $3, conversation_state = $4 WHERE user_id = $5',
-        [lat, lon, japaneseName, 'waiting_for_departure_station', userId]
+        [lat, lon, japaneseName, 'waiting_for_notification_time', userId]
     );
 
     console.log(`ユーザー (${userId}) の地域を ${stateName} ${japaneseName} に設定しました。`);
-    const replyText = `${stateName ? stateName + 'の' : ''}${japaneseName}やな、了解やで！\n次は電車の運行状況を調べたいさかい、一番よう使う駅（出発駅）を教えてくれるか？（例：池袋）\n電車を使わへん場合は「なし」と入力してな。`;
+    const replyText = `${stateName ? stateName + 'の' : ''}${japaneseName}やな、了解やで！\n次は毎朝の通知は何時がええか教えてな。（例：8:00）`;
     return client.replyMessage(replyToken, { type: 'text', text: replyText });
-}
-
-
-/**
- * 出発駅の登録を処理する
- */
-async function handleDepartureStation(event, userId, stationName) {
-    if (stationName === 'なし') {
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_notification_time' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: '電車は使わへんのやな、了解や！\nほな次に、毎朝の通知は何時がええか教えてな。（例：8:00）'
-        });
-    }
-
-    console.log(`ユーザー (${userId}) の出発駅登録処理: ${stationName}`);
-    const departureStation = stationName.replace(/駅$/, '');
-    await pool.query(
-        "UPDATE users SET temp_departure_station = $1, conversation_state = 'waiting_for_arrival_station' WHERE user_id = $2",
-        [departureStation, userId]
-    );
-    return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: `${departureStation}駅やな。ほな、職場とか学校の最寄り駅（到着駅）も教えてくれるか？（例：渋谷）`
-    });
-}
-
-/**
- * 到着駅を受け取り、Yahoo!乗換案内でルートを検索する
- */
-async function handleArrivalStation(event, userId, arrivalStation) {
-    const userResult = await pool.query('SELECT temp_departure_station FROM users WHERE user_id = $1', [userId]);
-    const departureStation = userResult.rows[0].temp_departure_station;
-    const arrivalStationClean = arrivalStation.replace(/駅$/, '');
-
-    console.log(`ユーザー (${userId}) のルート検索: ${departureStation} -> ${arrivalStationClean}`);
-
-    try {
-        const routes = await findRoutesFromYahoo(departureStation, arrivalStationClean);
-
-        if (routes.length === 0) {
-            await pool.query("UPDATE users SET conversation_state = 'waiting_for_departure_station' WHERE user_id = $1", [userId]);
-            return client.replyMessage(event.replyToken, { type: 'text', text: `すまんな、「${departureStation}」から「${arrivalStationClean}」へのルートが見つからへんかったわ。\n駅の正式名称が違うかもしれん。もう一回、出発駅から教えてくれるか？` });
-        }
-        
-        const buttons = routes.map((route, index) => {
-            const routeLabel = route.join(' → ');
-            return {
-                type: 'button',
-                action: {
-                    type: 'postback',
-                    label: `【${index + 1}】${routeLabel}`,
-                    data: `action=confirm_route&lines=${encodeURIComponent(route.join(','))}`
-                },
-                style: 'primary',
-                margin: 'md',
-                height: 'sm'
-            };
-        });
-
-        const flexMessage = {
-            type: 'flex',
-            altText: 'ルートの選択',
-            contents: {
-                type: 'bubble',
-                header: {
-                    type: 'box',
-                    layout: 'vertical',
-                    contents: [{ type: 'text', text: 'どのルートを使うとるか？', weight: 'bold', size: 'lg' }]
-                },
-                body: {
-                    type: 'box',
-                    layout: 'vertical',
-                    contents: [{ type: 'text', text: 'あんたがいつも使うルートを1つ選んでな。', wrap: true }]
-                },
-                footer: {
-                    type: 'box',
-                    layout: 'vertical',
-                    spacing: 'sm',
-                    contents: buttons
-                }
-            }
-        };
-
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_route_selection' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, flexMessage);
-
-    } catch (error) {
-        console.error('Yahoo!乗換案内のルート検索でエラー:', error);
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_departure_station' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、ルート検索で問題が起きたみたいや。もう一回、出発駅から教えてくれるか？' });
-    }
-}
-
-/**
- * Yahoo!乗換案内をスクレイピングしてルート情報を取得する
- */
-async function findRoutesFromYahoo(from, to) {
-    const url = `https://transit.yahoo.co.jp/search/result?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const browser = await puppeteer.launch({ 
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] // Renderで動かすための重要なおまじない
-    });
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2' });
-
-    // 検索結果がなかった場合のハンドリング
-    const noResult = await page.$('.error-sub');
-    if (noResult) {
-        await browser.close();
-        return [];
-    }
-    
-    const routes = await page.evaluate(() => {
-        const routeSummaries = Array.from(document.querySelectorAll('#srline .route-summary')).slice(0, 3);
-        return routeSummaries.map(summary => {
-            const lines = new Set();
-            summary.querySelectorAll('.transport .line').forEach(lineEl => {
-                const lineName = lineEl.textContent.trim().replace(/［有料］$/, '');
-                if (lineName) {
-                    lines.add(lineName);
-                }
-            });
-            return Array.from(lines);
-        });
-    });
-
-    await browser.close();
-    return routes.filter(route => route.length > 0);
 }
 
 
@@ -381,7 +251,6 @@ async function findRoutesFromYahoo(from, to) {
  * 通知時間の設定を処理する
  */
 async function handleNotificationTime(event, userId, text) {
-    // chrono-nodeで自然言語の時間を解析
     const results = chrono.ja.parse(text);
 
     if (results.length === 0) {
@@ -410,13 +279,11 @@ async function handleOffDays(event, userId, text) {
     const offDays = new Set();
     let found = false;
 
-    // 「なし」や「毎日」の場合
     if (['なし', 'ない', '毎日'].includes(text)) {
         await pool.query("UPDATE users SET notification_off_days = '[]', conversation_state = 'waiting_for_garbage_day' WHERE user_id = $1", [userId]);
         return client.replyMessage(event.replyToken, { type: 'text', text: '了解や！毎日通知するな！\n最後にゴミの日を教えてな。「燃えるゴミは月曜と木曜」みたいに教えてくれると助かるわ。登録せん場合は「なし」と入力してや。' });
     }
 
-    // 各曜日の表現をチェック
     for (const [key, value] of Object.entries(dayMap)) {
         if (text.includes(key)) {
             offDays.add(value);
@@ -448,8 +315,13 @@ async function handleOffDays(event, userId, text) {
 async function handleGarbageDayRegistration(event, userId, text) {
     const skipWords = ['なし', 'ない', 'スキップ', 'いらない'];
     if (skipWords.includes(text)) {
-        await pool.query("UPDATE users SET conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'ゴミの日は登録せんのやな、了解や！\nこれで全部の設定が終わったで！これから毎日あんたをサポートするさかい、よろしくな！' });
+        await pool.query("UPDATE users SET conversation_state = 'waiting_for_cooking_support_opt_in' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'ゴミの日は登録せんのやな、了解や！\n基本的な設定はこれで終わりや！\nところで、毎週おかんが献立の相談に乗ったり、お買いもんの提案してもええか？',
+            quickReply: { items: [
+                { type: 'action', action: { type: 'postback', label: 'お願いする！', data: 'action=opt_in_cooking' }},
+                { type: 'action', action: { type: 'postback', label: '自分でやるから大丈夫', data: 'action=opt_out_cooking' }}
+            ]}
+        });
     }
     
     console.log(`ユーザー (${userId}) のゴミの日登録処理: ${text}`);
@@ -492,10 +364,16 @@ async function handleGarbageDayRegistration(event, userId, text) {
         registered.forEach(r => {
             confirmation += `・${r.type}: ${r.days.join('、')}\n`;
         });
-        confirmation += '\nこれで全部の設定が終わったで！これから毎日あんたをサポートするさかい、よろしくな！';
-
-        await pool.query("UPDATE users SET conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: confirmation });
+        
+        await pool.query("UPDATE users SET conversation_state = 'waiting_for_cooking_support_opt_in' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: confirmation + '\n基本的な設定はこれで終わりや！\nところで、毎週おかんが献立の相談に乗ったり、お買いもんの提案してもええか？',
+            quickReply: { items: [
+                { type: 'action', action: { type: 'postback', label: 'お願いする！', data: 'action=opt_in_cooking' }},
+                { type: 'action', action: { type: 'postback', label: '自分でやるから大丈夫', data: 'action=opt_out_cooking' }}
+            ]}
+        });
 
     } catch (error) {
         console.error('ゴミの日登録でエラー:', error);
@@ -521,25 +399,17 @@ async function handlePostbackEvent(event, userId) {
         const location = { lat, lon, name, state };
         return registerAreaAndProceed(event.replyToken, userId, location);
     }
-
-    // ルート確定の処理
-    if (action === 'confirm_route') {
-        const lines = decodeURIComponent(data.get('lines')).split(',');
-        
-        // 既存の路線を削除してから新しい路線を登録
-        await pool.query('DELETE FROM train_routes WHERE user_id = $1', [userId]);
-        for (const lineName of lines) {
-            await pool.query('INSERT INTO train_routes (user_id, line_name) VALUES ($1, $2)', [userId, lineName]);
-        }
-        
-        const lineNames = lines.join('、');
-        await pool.query("UPDATE users SET conversation_state = 'waiting_for_notification_time' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: `【${lineNames}】やな、覚えたで！\nほな次に、毎朝の通知は何時がええか教えてな。（例：8:00）`
-        });
-    }
     
+    // ★ 自炊サポートのオプトイン/アウト処理
+    if (action === 'opt_in_cooking') {
+        await pool.query("UPDATE users SET cooking_support_enabled = true, conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: '了解や！おかんがしっかりサポートするさかい、任しとき！\nこれからよろしくな！' });
+    }
+    if (action === 'opt_out_cooking') {
+        await pool.query("UPDATE users SET cooking_support_enabled = false, conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'そっか、偉いなあ！あんたなら大丈夫やな！\nでも、困ったらいつでも「今日の晩ごはん」て話しかけてな。相談乗るで！' });
+    }
+
     return Promise.resolve(null);
 }
 
@@ -629,7 +499,8 @@ async function setupDatabase() {
             temp_departure_station: 'TEXT',
             notification_time: 'TIME',
             notification_off_days: 'TEXT',
-            last_notified_date: 'DATE'
+            last_notified_date: 'DATE',
+            cooking_support_enabled: 'BOOLEAN DEFAULT false' // ★ 追加
         };
         for (const [column, type] of Object.entries(usersColumns)) {
             const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
