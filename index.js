@@ -629,7 +629,7 @@ async function setupDatabase() {
             temp_departure_station: 'TEXT',
             notification_time: 'TIME',
             notification_off_days: 'TEXT',
-            last_notified_date: 'DATE' // ★ 追加
+            last_notified_date: 'DATE'
         };
         for (const [column, type] of Object.entries(usersColumns)) {
             const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
