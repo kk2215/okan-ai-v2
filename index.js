@@ -105,6 +105,9 @@ async function handleEvent(event) {
     if (text.includes('今日の晩ごはん') || text.includes('お腹すいた')) {
         return handleDinnerRequest(userId);
     }
+    if (text.includes('買い物') || text.includes('食材') || text.includes('ミールキット')) {
+        return askCookingTime(userId);
+    }
     
     // どの条件にも合致しない場合、簡単な応答を返す
     return client.replyMessage(event.replyToken, {
@@ -400,7 +403,7 @@ async function handlePostbackEvent(event, userId) {
         return registerAreaAndProceed(event.replyToken, userId, location);
     }
     
-    // ★ 自炊サポートのオプトイン/アウト処理
+    // 自炊サポートのオプトイン/アウト処理
     if (action === 'opt_in_cooking') {
         await pool.query("UPDATE users SET cooking_support_enabled = true, conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
         return client.replyMessage(event.replyToken, { type: 'text', text: '了解や！おかんがしっかりサポートするさかい、任しとき！\nこれからよろしくな！' });
@@ -500,7 +503,7 @@ async function setupDatabase() {
             notification_time: 'TIME',
             notification_off_days: 'TEXT',
             last_notified_date: 'DATE',
-            cooking_support_enabled: 'BOOLEAN DEFAULT false' // ★ 追加
+            cooking_support_enabled: 'BOOLEAN DEFAULT false'
         };
         for (const [column, type] of Object.entries(usersColumns)) {
             const res = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name=$1`, [column]);
