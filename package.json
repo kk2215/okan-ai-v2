@@ -4,7 +4,8 @@
   "description": "LINE bot to support young people living alone in the city.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "@line/bot-sdk": "^8.4.1",
