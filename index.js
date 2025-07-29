@@ -141,7 +141,6 @@ async function handleFollowEvent(event, userId) {
         // 既存の設定をクリアして最初から
         await Promise.all([
             pool.query("UPDATE users SET conversation_state = 'waiting_for_area', last_notified_date = NULL, cooking_support_enabled = false WHERE user_id = $1", [userId]),
-            pool.query("DELETE FROM train_routes WHERE user_id = $1", [userId]),
             pool.query("DELETE FROM garbage_days WHERE user_id = $1", [userId])
         ]);
         return client.replyMessage(event.replyToken, { type: 'text', text: welcomeBackMessage });
