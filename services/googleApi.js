@@ -1,14 +1,12 @@
 // services/googleApi.js - Google Maps APIと通信する専門家
 
 const axios = require('axios');
-// ★★★ これが正しい道具の取り出し方や！ほんまにごめん！ ★★★
-const { zonedTimeToUtc } = require('date-fns-tz'); 
+// もう時差ボケを直す道具には頼らへん！自力で計算するで！
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
-const TIME_ZONE = 'Asia/Tokyo'; // 日本の時間を指定
 
 /**
- * 出発地と目的地から路線リストを取得する（最終奥義・時差ボケ修正版）
+ * 出発地と目的地から路線リストを取得する（最終奥義・自力計算版）
  * @param {string} from - 出発地
  * @param {string} to - 目的地
  * @returns {Promise<string[]|null>} 路線名の配列
@@ -22,17 +20,20 @@ async function getLinesFromGoogle(from, to) {
     const fromStation = from.endsWith('駅') ? from : from + '駅';
     const toStation = to.endsWith('駅') ? to : to + '駅';
 
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const year = tomorrow.getFullYear();
-    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
-    const day = String(tomorrow.getDate()).padStart(2, '0');
-    
-    const departureDateString = `${year}-${month}-${day}T08:00:00`;
-    
-    // ★★★ 道具箱の名前をつけんと、直接道具を呼ぶんや ★★★
-    const departureDateInTokyo = zonedTimeToUtc(departureDateString, TIME_ZONE);
-    const departureTime = Math.floor(departureDateInTokyo.getTime() / 1000);
+    // ★★★ これが最後の作戦や！外部の道具に頼らず、日本の時間を計算する！ ★★★
+    // サーバーがどこにおっても、日本の現在時刻を文字列として取得する
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    // その文字列から、日本の現在時刻のDateオブジェクトを作る
+    const nowInTokyo = new Date(nowInTokyoStr);
+
+    // その日本の日付を基準に、明日の日付にする
+    nowInTokyo.setDate(nowInTokyo.getDate() + 1);
+    // 時間を朝の8時に設定
+    nowInTokyo.setHours(8, 0, 0, 0);
+
+    // Googleはんがわかる秒単位の数字にする
+    const departureTime = Math.floor(nowInTokyo.getTime() / 1000);
+
 
     try {
         const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
