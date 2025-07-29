@@ -227,7 +227,7 @@ async function handleAreaRegistration(event, userId, cityName) {
         }
     } catch (error) {
         console.error('地域登録処理でエラー:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、情報の取得で問題が起きたみたいや。ちょっと時間をおいてから、もう一回試してみてな。' });
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、情報の取得で問題が起きたみたいや。ちょっと時間をおいてから、もう一回試してみてな。' });
     }
 }
 
