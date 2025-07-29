@@ -1,4 +1,4 @@
-// services/train.js - 電車の運行情報・駅情報を取得する専門家
+// services/train.js - 電車の運行情報を取得する専門家 (シンプル版)
 
 const axios = require('axios');
 
@@ -10,7 +10,11 @@ const API_KEY = process.env.EKISPERT_API_KEY;
  * @returns {Promise<Array|null>} 運行情報オブジェクトの配列
  */
 async function fetchTrainStatus(lineNames) {
-    if (!API_KEY) { return null; }
+    // 駅すぱあとのAPIキーがまだない、または路線が設定されてない場合は何もしない
+    if (!API_KEY || !lineNames || lineNames.length === 0) { 
+        return null; 
+    }
+    
     const results = [];
     for (const name of lineNames) {
         try {
@@ -29,72 +33,6 @@ async function fetchTrainStatus(lineNames) {
     return results;
 }
 
-/**
- * 駅名から、その駅を通る路線一覧を取得する（賢い版）
- * @param {string} stationName - 駅名
- * @returns {Promise<string[]|null>} 路線名の配列
- */
-async function getLinesForStation(stationName) {
-    if (!API_KEY) { return null; }
-    
-    // まずは入力された名前そのままで検索してみる
-    let lines = await searchStation(stationName);
-
-    // もし見つからんかったら、後ろに「駅」を付けてもう一回探す
-    if (!lines || lines.length === 0) {
-        console.log(`「${stationName}」で見つからんかったから、「${stationName}駅」で再検索するで。`);
-        lines = await searchStation(stationName + '駅');
-    }
-
-    return lines;
-}
-
-/**
- * 駅すぱあとAPIを叩いて駅情報を検索する内部関数（軽量版API使用）
- * @param {string} nameToSearch - 検索する駅名
- * @returns {Promise<string[]|null>}
- */
-async function searchStation(nameToSearch) {
-    try {
-        // ★★★ ここのURLを軽量版に変えてみるで！ ★★★
-        const response = await axios.get('https://api.ekispert.jp/v1/json/station/light', {
-            params: {
-                key: API_KEY,
-                name: nameToSearch,
-            }
-        });
-
-        const points = response.data.ResultSet.Point;
-        if (!points) return [];
-
-        const allLines = [];
-        const pointArray = Array.isArray(points) ? points : [points]; 
-        
-        pointArray.forEach(point => {
-            // 軽量版はレスポンスの形がちょっと違うから、合わせとく
-            if (point.Line) {
-                const lines = Array.isArray(point.Line) ? point.Line : [point.Line];
-                lines.forEach(line => {
-                    allLines.push(line.Name);
-                });
-            }
-        });
-        
-        return [...new Set(allLines)];
-
-    } catch (error) {
-        // もしまたエラーが出ても、原因がわかるようにもっと詳しくログを出すようにしとく
-        if (error.response) {
-            console.error(`駅検索でAPIエラー！ Status: ${error.response.status}, Data:`, error.response.data);
-        } else {
-            console.error(`駅情報の取得で致命的なエラーが発生: ${nameToSearch}`, error.message);
-        }
-        return null; // エラー時はnullを返す
-    }
-}
-
-
 module.exports = {
     fetchTrainStatus,
-    getLinesForStation,
 };

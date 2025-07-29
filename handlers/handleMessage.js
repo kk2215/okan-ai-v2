@@ -1,7 +1,7 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
-const { getLinesFromGoogle } = require('../services/googleApi'); // Googleの専門家を呼ぶ
+const { getLinesByStationName } = require('../services/heartrails'); // 新しい相棒を呼ぶ！
 const { saveReminder } = require('../services/reminder');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
@@ -53,15 +53,17 @@ async function handleMessage(event, client) {
             }
             const [from, to] = stations;
             
-            // ★★★ ここでGoogleの専門家を呼ぶんや！ ★★★
-            const lines = await getLinesFromGoogle(from, to);
+            const linesFrom = await getLinesByStationName(from);
+            const linesTo = await getLinesByStationName(to);
 
-            if (!lines || lines.length === 0) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの公共交通機関での行き方が見つからんかったわ…` });
+            if ((!linesFrom || linesFrom.length === 0) && (!linesTo || linesTo.length === 0)) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」も「${to}」も見つからんかったわ…駅の名前、間違えてへんか？` });
             }
+
+            const allLines = [...new Set([...(linesFrom || []), ...(linesTo || [])])];
             
-            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: lines, selectedLines: [] });
-            const selectionMessage = createLineSelectionMessage(lines); // 見つかった路線リストを渡す
+            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
+            const selectionMessage = createLineSelectionMessage(allLines);
             return client.replyMessage(event.replyToken, selectionMessage);
         }
         
