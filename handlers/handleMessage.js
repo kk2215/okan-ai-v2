@@ -9,9 +9,8 @@ const { createLineSelectionMessage } = require('../templates/lineSelectionMessag
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
-const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const chrono = require('chrono-node');
-const { zonedTimeToUtc, utcToZonedTime } = require('date-fns-tz');
+const { utcToZonedTime } = require('date-fns-tz');
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -21,54 +20,16 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能 ---
-        const reminderKeywords = ['リマインド', 'リマインダー', '教えて', 'アラーム', '予定'];
-        if (!user.state && reminderKeywords.some(keyword => messageText.includes(keyword))) {
-            const reminderMenu = createReminderMenuMessage();
-            return client.replyMessage(event.replyToken, reminderMenu);
-        }
-        if (user.state === 'AWAITING_REMINDER') {
-            // ★★★ ここから国語の特別授業の成果や！ ★★★
-            // 日本の現在時刻を基準に、言葉を解釈するように教える
-            const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
-            const results = chrono.ja.parse(messageText, referenceDate, { forwardDate: true });
-
-            if (results.length === 0) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「明日の15時に会議」みたいに、日時も一緒に入れてくれるか？' });
-            }
-            
-            // 一番それっぽい解釈を一つだけ選ぶ
-            const result = results[0];
-            
-            // 賢い内容の抜き出し方
-            // 「明日の12時に買い物」から「買い物」だけを抜き出す
-            let title = messageText.substring(0, result.index) + messageText.substring(result.index + result.text.length);
-            title = title.replace(/で?に?、?を?(リマインド|リマインダー|教えて|アラーム)/, '').trim();
-
-            if (!title) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、肝心の内容がわからんかったわ。もう一回、「〇〇をリマインド」みたいに教えてくれるか？' });
-            }
-
-            const reminderData = { title: title };
-            const date = result.start;
-            
-            if (result.start.isCertain('weekday')) { // 毎週〇曜日
-                reminderData.type = 'weekly';
-                reminderData.dayOfWeek = date.get('weekday');
-                reminderData.notificationTime = date.isCertain('hour') ? `${String(date.get('hour')).padStart(2, '0')}:${String(date.get('minute')).padStart(2, '0')}` : '08:00';
-            } else { // 一回だけ
-                reminderData.type = 'once';
-                reminderData.targetDate = date.date().toISOString();
-            }
-            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData });
-            const confirmMessage = createConfirmReminderMessage(reminderData);
-            return client.replyMessage(event.replyToken, confirmMessage);
-        }
-
-        // --- 初期設定フロー ---
+        // --- 初期設定中や、何かを待ってる状態の時の会話 ---
         if (user.state) {
             const state = user.state;
 
+            // リマインダーの内容を具体的に聞かれてる時
+            if (state === 'AWAITING_REMINDER') {
+                return await handleReminderInput(userId, messageText, client, event.replyToken);
+            }
+            
+            // (↓ここから下は、初期設定の会話やから変更なし)
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -86,7 +47,6 @@ async function handleMessage(event, client) {
                 const selectionMessage = createLocationSelectionMessage(locations);
                 return client.replyMessage(event.replyToken, selectionMessage);
             }
-            
             if (state === 'AWAITING_TRAIN_LINE') {
                 if (messageText === '電車の設定する') {
                     await updateUserState(userId, 'AWAITING_STATIONS');
@@ -99,7 +59,6 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: '電車はええのね。ほな次いこか！' }, nextMessage]);
                 }
             }
-
             if (state === 'AWAITING_STATIONS') {
                 const stations = messageText.split(/から|まで/g).map(s => s.trim()).filter(Boolean);
                 if (stations.length < 2) {
@@ -116,7 +75,6 @@ async function handleMessage(event, client) {
                 const selectionMessage = createLineSelectionMessage(allLines);
                 return client.replyMessage(event.replyToken, selectionMessage);
             }
-            
             if (state === 'AWAITING_GARBAGE_DAY') {
                 if (messageText === 'ゴミの日を設定する') {
                     await updateUserState(userId, 'AWAITING_REMINDER');
@@ -129,13 +87,63 @@ async function handleMessage(event, client) {
             }
         }
 
-        // 通常の会話
+        // --- ★★★ ここからが新しい読心術や！ ★★★ ---
+        // 通常の会話の中に、リマインドしてほしいことが隠れてないか、毎回チェックする
+        const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken);
+        if (proactiveReminderResult) {
+            // リマインダーとして解釈できたら、それで会話は終わり
+            return;
+        }
+
+        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
         console.error('メッセージの処理でエラーが出てもうたわ:', error);
         return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめんやで、ちょっと今忙しいみたい…。また後で話しかけてくれる？' });
     }
+}
+
+/**
+ * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
+ */
+async function handleReminderInput(userId, text, client, replyToken) {
+    const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
+    const results = chrono.ja.parse(text, referenceDate, { forwardDate: true });
+
+    // 「いつ」がわからんかったら、リマインダーとは判断せえへん
+    if (results.length === 0) {
+        return false;
+    }
+    
+    const result = results[0];
+    
+    // 「何を」を賢く抜き出す
+    let title = text.substring(0, result.index) + text.substring(result.index + result.text.length);
+    title = title.replace(/で?に?、?を?(リマインド|リマインダー|教えて|アラーム|って|のこと)/, '').trim();
+
+    // 「何を」がわからんかったら、リマインダーとは判断せえへん
+    if (!title) {
+        return false;
+    }
+
+    const reminderData = { title: title };
+    const date = result.start;
+    
+    if (result.start.isCertain('weekday')) { // 毎週〇曜日
+        reminderData.type = 'weekly';
+        reminderData.dayOfWeek = date.get('weekday');
+        reminderData.notificationTime = date.isCertain('hour') ? `${String(date.get('hour')).padStart(2, '0')}:${String(date.get('minute')).padStart(2, '0')}` : '08:00';
+    } else { // 一回だけ
+        reminderData.type = 'once';
+        reminderData.targetDate = date.date().toISOString();
+    }
+    
+    // 最終確認するで
+    await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData });
+    const confirmMessage = createConfirmReminderMessage(reminderData);
+    await client.replyMessage(replyToken, confirmMessage);
+    return true; // リマインダーとして処理できたで！という合図
 }
 
 module.exports = handleMessage;
