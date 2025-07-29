@@ -2,6 +2,7 @@
 
 function createAskTrainLineMessage() {
     return {
+        type: 'text', // この一行を追加するんや！
         text: '次は電車の運行情報の設定や。\n朝の通知と一緒に、いつも乗る電車の遅れとかも教えたろか？',
         quickReply: {
             items: [

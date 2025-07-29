@@ -2,6 +2,7 @@
 
 function createAskGarbageDayMessage() {
     return {
+        type: 'text', // この一行を追加するんや！
         text: '最後にゴミの日のお知らせ設定や。\nうっかり忘れへんように、収集日の朝に教えたろか？',
         quickReply: {
             items: [
