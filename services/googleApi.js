@@ -1,7 +1,8 @@
 // services/googleApi.js - Google Maps APIと通信する専門家
 
 const axios = require('axios');
-// 時差ボケを直す道具は、使う直前に最新の方法で取り寄せることにするで！
+// ★★★ これが正しい道具の取り出し方や！ほんまにごめん！ ★★★
+const { zonedTimeToUtc } = require('date-fns-tz'); 
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const TIME_ZONE = 'Asia/Tokyo'; // 日本の時間を指定
@@ -13,9 +14,6 @@ const TIME_ZONE = 'Asia/Tokyo'; // 日本の時間を指定
  * @returns {Promise<string[]|null>} 路線名の配列
  */
 async function getLinesFromGoogle(from, to) {
-    // ★★★ これが最後の作戦や！道具の取り寄せ方を変える！ ★★★
-    const { zonedTimeToUtc } = await import('date-fns-tz');
-
     if (!API_KEY) {
         console.error('Google MapsのAPIキーが設定されてへんで！');
         return null;
@@ -32,6 +30,7 @@ async function getLinesFromGoogle(from, to) {
     
     const departureDateString = `${year}-${month}-${day}T08:00:00`;
     
+    // ★★★ 道具箱の名前をつけんと、直接道具を呼ぶんや ★★★
     const departureDateInTokyo = zonedTimeToUtc(departureDateString, TIME_ZONE);
     const departureTime = Math.floor(departureDateInTokyo.getTime() / 1000);
 
