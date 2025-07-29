@@ -1,7 +1,8 @@
 // services/googleApi.js - Google Maps APIと通信する専門家
 
 const axios = require('axios');
-const { zonedTimeToUtc } = require('date-fns-tz'); // 時差ボケを直す道具をインポート
+// ★★★ ここの書き方を、もっと確実な方法に変えるで！ ★★★
+const dateFnsTz = require('date-fns-tz'); 
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const TIME_ZONE = 'Asia/Tokyo'; // 日本の時間を指定
@@ -21,18 +22,16 @@ async function getLinesFromGoogle(from, to) {
     const fromStation = from.endsWith('駅') ? from : from + '駅';
     const toStation = to.endsWith('駅') ? to : to + '駅';
 
-    // ★★★ これが最後の作戦や！「日本の明日の朝8時」を正確に計算する ★★★
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const year = tomorrow.getFullYear();
     const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
     const day = String(tomorrow.getDate()).padStart(2, '0');
     
-    // '2025-07-31T08:00:00' のような文字列を作る
     const departureDateString = `${year}-${month}-${day}T08:00:00`;
-    // 日本時間として解釈して、世界標準時に変換
-    const departureDateInTokyo = zonedTimeToUtc(departureDateString, TIME_ZONE);
-    // Googleはんがわかる秒単位の数字にする
+    
+    // ★★★ ここで、さっき読み込んだ道具箱から、ちゃんと道具を取り出す ★★★
+    const departureDateInTokyo = dateFnsTz.zonedTimeToUtc(departureDateString, TIME_ZONE);
     const departureTime = Math.floor(departureDateInTokyo.getTime() / 1000);
 
     try {
