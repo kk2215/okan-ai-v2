@@ -23,13 +23,18 @@ async function getLinesByStationName(stationName) {
             return []; // 駅が見つからんかったら空っぽを返す
         }
 
-        // 複数の駅が見つかる場合もあるので、全駅の全路線を合体させる
         const allLines = new Set();
         stations.forEach(station => {
-            station.line.forEach(line => {
-                // JR〇〇線 のように、会社名が付いてることが多いので、それもそのまま使う
-                allLines.add(line);
-            });
+            // ★★★ ここが修正ポイントや！ ★★★
+            // 路線が1本だけの場合、文字列で返ってくる。複数ある場合は配列。
+            // どっちの場合でもええように、必ず配列として扱うようにするんや。
+            if (station.line) {
+                const lines = Array.isArray(station.line) ? station.line : [station.line];
+                
+                lines.forEach(line => {
+                    allLines.add(line);
+                });
+            }
         });
         
         return Array.from(allLines);
