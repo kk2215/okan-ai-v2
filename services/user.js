@@ -6,7 +6,7 @@ const USERS_COLLECTION = 'users';
 
 /**
  * 新しいユーザーを作成、または既存ユーザー情報を更新する
- * @param {object} userData - { userId, displayName, state? } を含むユーザーデータ
+ * @param {object} userData - { userId, displayName } を含むユーザーデータ
  */
 async function saveUser(userData) {
     const db = getDb();
@@ -17,13 +17,12 @@ async function saveUser(userData) {
         notificationTime: '07:00',
         location: null,
         trainLines: [],
-        // ★★★ ここが修正ポイントや！ ★★★
-        // 渡された状態があればそれを使い、なければnullにする
-        state: userData.state || null,
+        state: null, // ★★★ ここを、最初は必ずnullで作成するようにする ★★★
         tempData: {},
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
     };
+    // setに { merge: true } をつけると、ドキュメントがなくても作成、あっても指定した項目だけ更新してくれる
     await userRef.set(initialData, { merge: true });
     console.log(`ユーザー情報を保存しました: ${userData.displayName} (${userData.userId})`);
 }
