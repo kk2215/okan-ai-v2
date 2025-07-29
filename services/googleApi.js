@@ -1,8 +1,8 @@
 // services/googleApi.js - Google Maps APIと通信する専門家
 
 const axios = require('axios');
-// ★★★ ここの書き方を、もっと確実な方法に変えるで！ ★★★
-const dateFnsTz = require('date-fns-tz'); 
+// ★★★ これが正しい道具の取り出し方や！ほんまにごめん！ ★★★
+const { zonedTimeToUtc } = require('date-fns-tz'); 
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const TIME_ZONE = 'Asia/Tokyo'; // 日本の時間を指定
@@ -30,8 +30,8 @@ async function getLinesFromGoogle(from, to) {
     
     const departureDateString = `${year}-${month}-${day}T08:00:00`;
     
-    // ★★★ ここで、さっき読み込んだ道具箱から、ちゃんと道具を取り出す ★★★
-    const departureDateInTokyo = dateFnsTz.zonedTimeToUtc(departureDateString, TIME_ZONE);
+    // ★★★ 道具箱の名前をつけんと、直接道具を呼ぶんや ★★★
+    const departureDateInTokyo = zonedTimeToUtc(departureDateString, TIME_ZONE);
     const departureTime = Math.floor(departureDateInTokyo.getTime() / 1000);
 
     try {
