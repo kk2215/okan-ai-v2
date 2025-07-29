@@ -227,7 +227,7 @@ async function handleAreaRegistration(event, userId, cityName) {
         }
     } catch (error) {
         console.error('地域登録処理でエラー:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまん、情報の取得で問題が起きたみたいや。ちょっと時間をおいてから、もう一回試してみてな。' });
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、情報の取得で問題が起きたみたいや。ちょっと時間をおいてから、もう一回試してみてな。' });
     }
 }
 
@@ -406,11 +406,13 @@ async function handlePostbackEvent(event, userId) {
     // 自炊サポートのオプトイン/アウト処理
     if (action === 'opt_in_cooking') {
         await pool.query("UPDATE users SET cooking_support_enabled = true, conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: '了解や！おかんがしっかりサポートするさかい、任しとき！\nこれからよろしくな！' });
+        await sendCompletionMessage(userId);
+        return;
     }
     if (action === 'opt_out_cooking') {
         await pool.query("UPDATE users SET cooking_support_enabled = false, conversation_state = 'setup_completed' WHERE user_id = $1", [userId]);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'そっか、偉いなあ！あんたなら大丈夫やな！\nでも、困ったらいつでも「今日の晩ごはん」て話しかけてな。相談乗るで！' });
+        await sendCompletionMessage(userId);
+        return;
     }
 
     return Promise.resolve(null);
