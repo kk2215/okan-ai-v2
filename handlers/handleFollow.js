@@ -1,6 +1,6 @@
 // handlers/handleFollow.js - 友だち追加イベントを担当
 
-const { saveUser, updateUserState } = require('../services/user');
+const { saveUser } = require('../services/user'); // updateUserStateはもうここにはいらん
 const { createWelcomeMessage } = require('../templates/welcomeMessage');
 const { createAskLocationMessage } = require('../templates/askLocationMessage');
 
@@ -16,17 +16,15 @@ async function handleFollow(event, client) {
     try {
         const profile = await client.getProfile(userId);
 
-        // ★★★ ここが修正ポイントや！ ★★★
-        // 1. まず、ユーザー情報を確実にDBに保存する
+        // ★★★ これが修正ポイントや！ ★★★
+        // ユーザー情報と最初の状態を、一回の仕事でまとめてDBに保存するんや
         await saveUser({
             userId: profile.userId,
             displayName: profile.displayName,
+            state: 'AWAITING_LOCATION' // 最初の状態をここで指定する
         });
         
-        // 2. その後で、ユーザーの状態を「地域の返信待ち」に更新する
-        await updateUserState(userId, 'AWAITING_LOCATION');
-
-        // 3. 挨拶と最初の質問を一緒に送信
+        // 挨拶と最初の質問を一緒に送信
         const welcomeMessage = createWelcomeMessage(profile.displayName);
         const askLocationMessage = createAskLocationMessage();
         

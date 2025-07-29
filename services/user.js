@@ -6,7 +6,7 @@ const USERS_COLLECTION = 'users';
 
 /**
  * 新しいユーザーを作成、または既存ユーザー情報を更新する
- * @param {object} userData - { userId, displayName } を含むユーザーデータ
+ * @param {object} userData - { userId, displayName, state? } を含むユーザーデータ
  */
 async function saveUser(userData) {
     const db = getDb();
@@ -17,7 +17,9 @@ async function saveUser(userData) {
         notificationTime: '07:00',
         location: null,
         trainLines: [],
-        state: null, // ★★★ ここを、最初は必ずnullで作成するようにする ★★★
+        // ★★★ ここが修正ポイントや！ ★★★
+        // 渡された状態があればそれを使い、なければnullにする
+        state: userData.state || null,
         tempData: {},
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
