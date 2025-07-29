@@ -1,7 +1,7 @@
 // services/reminder.js - リマインダー情報のデータベース操作を担当
 
 const { getDb, FieldValue } = require('./firestore');
-const { utcToZonedTime } = require('date-fns-tz');
+const { utcToZonedTime } = require('date-fns-tz'); // 正しい道具の取り出し方
 
 const USERS_COLLECTION = 'users';
 const REMINDERS_COLLECTION = 'reminders';
@@ -14,9 +14,8 @@ const REMINDERS_COLLECTION = 'reminders';
 async function saveReminder(userId, reminderData) {
     const db = getDb();
     const reminderRef = db.collection(USERS_COLLECTION).doc(userId)
-                          .collection(REMINDERS_COLLECTION).doc(); // 自動IDで新規作成
+                          .collection(REMINDERS_COLLECTION).doc();
 
-    // FirestoreはDateオブジェクトを直接保存できるので、それを使う
     const dataToSave = {
         ...reminderData,
         userId: userId,
@@ -25,7 +24,6 @@ async function saveReminder(userId, reminderData) {
         lastNotifiedAt: null,
     };
     
-    // targetDateが文字列で来たらDateオブジェクトに変換
     if (dataToSave.targetDate && typeof dataToSave.targetDate === 'string') {
         dataToSave.targetDate = utcToZonedTime(new Date(dataToSave.targetDate), 'Asia/Tokyo');
     }
@@ -50,14 +48,11 @@ async function getReminders(userId) {
                              .where('isActive', '==', true)
                              .get();
     
-    if (snapshot.empty) {
-        return [];
-    }
+    if (snapshot.empty) { return []; }
 
     const reminders = [];
     snapshot.forEach(doc => {
         const data = doc.data();
-        // Firestoreから取得したタイムスタンプをDateオブジェクトに変換
         const reminder = {
             id: doc.id,
             ...data,
@@ -81,16 +76,11 @@ async function updateLastNotified(userId, reminderId, deactivate = false) {
     const reminderRef = db.collection(USERS_COLLECTION).doc(userId)
                           .collection(REMINDERS_COLLECTION).doc(reminderId);
     
-    const updateData = {
-        lastNotifiedAt: FieldValue.serverTimestamp()
-    };
-    if (deactivate) {
-        updateData.isActive = false;
-    }
+    const updateData = { lastNotifiedAt: FieldValue.serverTimestamp() };
+    if (deactivate) { updateData.isActive = false; }
 
     await reminderRef.update(updateData);
 }
-
 
 module.exports = {
     saveReminder,

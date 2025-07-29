@@ -1,6 +1,6 @@
 // templates/confirmReminderMessage.js - リマインダー内容の最終確認メッセージを作成
 
-const { format } = require('date-fns-tz');
+const { formatInTimeZone } = require('date-fns-tz'); // 正しい道具の取り出し方
 
 function createConfirmReminderMessage(reminderData) {
     const { title, type, notificationTime, dayOfWeek, targetDate } = reminderData;
@@ -11,7 +11,8 @@ function createConfirmReminderMessage(reminderData) {
         whenText = `毎週${dayOfWeekMap[dayOfWeek]}の${notificationTime}頃`;
     } else if (type === 'once') {
         const date = new Date(targetDate);
-        whenText = format(date, 'M月d日(E) HH:mm', { timeZone: 'Asia/Tokyo' });
+        // formatInTimeZone を使うて、日本の時間で表示する
+        whenText = formatInTimeZone(date, 'Asia/Tokyo', 'M月d日(E) HH:mm');
     }
 
     const confirmText = `「${title}」やな。\n${whenText}に教えたらええんか？`;
