@@ -30,32 +30,48 @@ async function fetchTrainStatus(lineNames) {
 }
 
 /**
- * 駅名から、その駅を通る路線一覧を取得する
+ * 駅名から、その駅を通る路線一覧を取得する（賢い版）
  * @param {string} stationName - 駅名
  * @returns {Promise<string[]|null>} 路線名の配列
  */
 async function getLinesForStation(stationName) {
     if (!API_KEY) { return null; }
+    
+    // まずは入力された名前そのままで検索してみる
+    let lines = await searchStation(stationName);
+
+    // もし見つからんかったら、後ろに「駅」を付けてもう一回探す
+    if (!lines || lines.length === 0) {
+        console.log(`「${stationName}」で見つからんかったから、「${stationName}駅」で再検索するで。`);
+        lines = await searchStation(stationName + '駅');
+    }
+
+    return lines;
+}
+
+/**
+ * 駅すぱあとAPIを叩いて駅情報を検索する内部関数
+ * @param {string} nameToSearch - 検索する駅名
+ * @returns {Promise<string[]|null>}
+ */
+async function searchStation(nameToSearch) {
     try {
         const response = await axios.get('https://api.ekispert.jp/v1/json/station', {
             params: {
                 key: API_KEY,
-                name: stationName,
-                type: 'train' // 電車に限定
+                name: nameToSearch,
+                type: 'train'
             }
         });
 
         const points = response.data.ResultSet.Point;
         if (!points) return [];
 
-        // 複数の駅が見つかる場合もあるので、全駅の全路線を合体させる
         const allLines = [];
-        // Pointが単一オブジェクトか配列かAPIの仕様で変わるので、両対応しとく
         const pointArray = Array.isArray(points) ? points : [points]; 
         
         pointArray.forEach(point => {
-            if (point.Station.Line) {
-                // Lineも単一か配列か分からんので、両対応
+            if (point.Station && point.Station.Line) {
                 const lines = Array.isArray(point.Station.Line) ? point.Station.Line : [point.Station.Line];
                 lines.forEach(line => {
                     allLines.push(line.Name);
@@ -63,16 +79,22 @@ async function getLinesForStation(stationName) {
             }
         });
         
-        return [...new Set(allLines)]; // 重複を除いて返す
+        return [...new Set(allLines)];
 
     } catch (error) {
-        console.error(`駅情報の取得に失敗: ${stationName}`, error.message);
-        return null;
+        // 404 Not Foundのようなエラーは、ここでは「見つからなかった」として扱う
+        if (error.response && error.response.status !== 200) {
+            console.warn(`駅検索でAPIエラーが発生したけど、処理は続けるで: ${nameToSearch} (Status: ${error.response.status})`);
+            return null;
+        }
+        // それ以外の致命的なエラーはちゃんとログに出す
+        console.error(`駅情報の取得で致命的なエラーが発生: ${nameToSearch}`, error.message);
+        return null; // エラー時はnullを返す
     }
 }
 
 
 module.exports = {
     fetchTrainStatus,
-    getLinesForStation, // 新しい関数
+    getLinesForStation,
 };
