@@ -1,11 +1,13 @@
 // services/googleApi.js - Google Maps APIと通信する専門家
 
 const axios = require('axios');
+const { zonedTimeToUtc } = require('date-fns-tz'); // 時差ボケを直す道具をインポート
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const TIME_ZONE = 'Asia/Tokyo'; // 日本の時間を指定
 
 /**
- * 出発地と目的地から路線リストを取得する（最終奥義・時間指定版）
+ * 出発地と目的地から路線リストを取得する（最終奥義・時差ボケ修正版）
  * @param {string} from - 出発地
  * @param {string} to - 目的地
  * @returns {Promise<string[]|null>} 路線名の配列
@@ -19,12 +21,19 @@ async function getLinesFromGoogle(from, to) {
     const fromStation = from.endsWith('駅') ? from : from + '駅';
     const toStation = to.endsWith('駅') ? to : to + '駅';
 
-    // ★★★ ここが新しい作戦や！ ★★★
-    // 明日の朝8時の時間を計算する
+    // ★★★ これが最後の作戦や！「日本の明日の朝8時」を正確に計算する ★★★
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(8, 0, 0, 0);
-    const departureTime = Math.floor(tomorrow.getTime() / 1000); // 秒単位のタイムスタンプに変換
+    const year = tomorrow.getFullYear();
+    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const day = String(tomorrow.getDate()).padStart(2, '0');
+    
+    // '2025-07-31T08:00:00' のような文字列を作る
+    const departureDateString = `${year}-${month}-${day}T08:00:00`;
+    // 日本時間として解釈して、世界標準時に変換
+    const departureDateInTokyo = zonedTimeToUtc(departureDateString, TIME_ZONE);
+    // Googleはんがわかる秒単位の数字にする
+    const departureTime = Math.floor(departureDateInTokyo.getTime() / 1000);
 
     try {
         const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
@@ -34,7 +43,7 @@ async function getLinesFromGoogle(from, to) {
                 mode: 'transit',
                 language: 'ja',
                 region: 'jp',
-                departure_time: departureTime, // 「この時間に出発するで！」と教える
+                departure_time: departureTime,
                 key: API_KEY,
             }
         });
@@ -65,7 +74,7 @@ async function searchWithoutStationSuffix(from, to, departureTime) {
                 mode: 'transit', 
                 language: 'ja', 
                 region: 'jp',
-                departure_time: departureTime, // こっちにも時間を教えとく
+                departure_time: departureTime,
                 key: API_KEY 
             }
         });
