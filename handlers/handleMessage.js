@@ -1,7 +1,7 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
-const { getLinesForStation } = require('../services/train');
+const { getLinesFromGoogle } = require('../services/googleApi'); // Googleの専門家を呼ぶ
 const { saveReminder } = require('../services/reminder');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
@@ -52,17 +52,16 @@ async function handleMessage(event, client) {
                 return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「和光市から巣鴨」みたいにもう一回教えてくれるか？' });
             }
             const [from, to] = stations;
-            const linesFrom = await getLinesForStation(from);
-            const linesTo = await getLinesForStation(to);
-
-            if ((!linesFrom || linesFrom.length === 0) && (!linesTo || linesTo.length === 0)) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」も「${to}」も見つからんかったわ…駅の名前、間違えてへんか？` });
-            }
-
-            const allLines = [...new Set([...(linesFrom || []), ...(linesTo || [])])];
             
-            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
-            const selectionMessage = createLineSelectionMessage(allLines);
+            // ★★★ ここでGoogleの専門家を呼ぶんや！ ★★★
+            const lines = await getLinesFromGoogle(from, to);
+
+            if (!lines || lines.length === 0) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの公共交通機関での行き方が見つからんかったわ…` });
+            }
+            
+            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: lines, selectedLines: [] });
+            const selectionMessage = createLineSelectionMessage(lines); // 見つかった路線リストを渡す
             return client.replyMessage(event.replyToken, selectionMessage);
         }
         

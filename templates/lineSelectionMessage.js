@@ -1,4 +1,4 @@
-// templates/lineSelectionMessage.js - 路線を選択させるメッセージを作成
+// templates/lineSelectionMessage.js - 路線を選択させるメッセージを作成 (Google版)
 
 function createLineSelectionMessage(lines) {
     if (!lines || lines.length === 0) {
