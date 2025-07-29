@@ -2,7 +2,7 @@
 
 const { getUser, updateUserState, updateUserNotificationTime, saveUserTrainLines } = require('../services/user');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
-const { createTrainLineConfirmationMessage } = require('../templates/trainLineConfirmationMessage'); // 新しい仲間
+const { createTrainLineConfirmationMessage } = require('../templates/trainLineConfirmationMessage');
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -11,14 +11,12 @@ async function handlePostback(event, client) {
 
     try {
         const user = await getUser(userId);
-        if (!user) return; // ユーザーがおらんかったら何もしない
+        if (!user) return;
 
-        // 通知時間設定ボタンが押された場合
         if (action === 'set_notification_time') {
             const time = event.postback.params.time;
             await updateUserNotificationTime(userId, time);
             await updateUserState(userId, 'AWAITING_TRAIN_LINE');
-            // 電車の質問をクイック返信に変えたので、ここではお礼だけ言う
             return client.replyMessage(event.replyToken, {
                 type: 'text',
                 text: `「${time}」やね、承知したで！\n次は電車の設定や。下のボタンから選んでな。`,
@@ -31,32 +29,32 @@ async function handlePostback(event, client) {
             });
         }
 
-        // 新しい仕事：経路選択ボタンが押された場合
-        if (action === 'select_route') {
-            const routeIndex = parseInt(data.get('index'), 10);
-            const routes = user.tempData.routes; // 一時保存した経路リストを取得
-
-            if (!routes || !routes[routeIndex]) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、どの経路を選んだか、わからんようになってしもたわ…' });
+        if (action === 'add_line') {
+            const lineToAdd = data.get('line');
+            let selectedLines = user.tempData.selectedLines || [];
+            if (!selectedLines.includes(lineToAdd)) {
+                selectedLines.push(lineToAdd);
             }
+            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, selectedLines: selectedLines });
+            return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineToAdd}」を追加したで！` });
+        }
 
-            const selectedLines = routes[routeIndex].lines;
-            
-            // 確認メッセージを送る
+        if (action === 'confirm_line_selection') {
+            const selectedLines = user.tempData.selectedLines || [];
+            if (selectedLines.length === 0) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: '路線が一つも選ばれてへんで！' });
+            }
             await updateUserState(userId, 'AWAITING_TRAIN_CONFIRMATION', { lines: selectedLines });
             const confirmationMessage = createTrainLineConfirmationMessage(selectedLines);
             return client.replyMessage(event.replyToken, confirmationMessage);
         }
-
-        // 新しい仕事：路線登録の最終確認ボタンが押された場合
+        
         if (action === 'confirm_train_lines') {
             const lines = user.tempData.lines;
-            await saveUserTrainLines(userId, lines); // 路線をDBに本保存
+            await saveUserTrainLines(userId, lines);
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
-            
             const replyText = 'よっしゃ、登録しといたで！';
             const nextMessage = createAskGarbageDayMessage();
-
             return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
         }
         
@@ -65,7 +63,6 @@ async function handlePostback(event, client) {
              const nextMessage = createAskGarbageDayMessage();
              return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ほな、やめとこか。' }, nextMessage]);
         }
-
 
     } catch (error) {
         console.error('ボタンの処理でエラーが出てもうたわ:', error);

@@ -14,7 +14,7 @@ async function saveUser(userData) {
         location: null,
         trainLines: [],
         state: null,
-        tempData: {}, // 一時的なデータを保存するポケットを追加
+        tempData: {},
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
     };
@@ -37,9 +37,10 @@ async function updateUserState(userId, state, tempData = null) {
         state: state,
         updatedAt: FieldValue.serverTimestamp(),
     };
-    // 一時データも一緒に保存できるようにする
     if (tempData) {
         updateData.tempData = tempData;
+    } else if (tempData === null) { // nullが指定されたら、ポケットを空にする
+        updateData.tempData = {};
     }
     await userRef.update(updateData);
     console.log(`ユーザーの状態を更新しました: ${userId} -> ${state}`);
@@ -70,7 +71,7 @@ async function saveUserTrainLines(userId, lines) {
     const userRef = db.collection(USERS_COLLECTION).doc(userId);
     await userRef.update({
         trainLines: lines,
-        tempData: FieldValue.delete(), // 使った一時データは消しとく
+        tempData: FieldValue.delete(),
         updatedAt: FieldValue.serverTimestamp(),
     });
     console.log(`ユーザーの路線を更新しました: ${userId} -> ${lines.join(', ')}`);
