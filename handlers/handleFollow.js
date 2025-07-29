@@ -4,11 +4,17 @@ const { saveUser, updateUserState } = require('../services/user');
 const { createWelcomeMessage } = require('../templates/welcomeMessage');
 const { createAskLocationMessage } = require('../templates/askLocationMessage');
 
+/**
+ * ユーザーがボットを友だち追加したときの処理
+ * @param {object} event - LINEのフォローイベントオブジェクト
+ * @param {object} client - LINEのクライアントインスタンス
+ */
 async function handleFollow(event, client) {
     const userId = event.source.userId;
     console.log(`新しいお友だちが来たわよ！ User ID: ${userId}`);
 
     try {
+        // LINEサーバーからユーザーのプロフィール情報を取得
         const profile = await client.getProfile(userId);
 
         // 1. ユーザー情報をDBに保存
