@@ -50,17 +50,17 @@ async function getLinesForStation(stationName) {
 }
 
 /**
- * 駅すぱあとAPIを叩いて駅情報を検索する内部関数
+ * 駅すぱあとAPIを叩いて駅情報を検索する内部関数（軽量版API使用）
  * @param {string} nameToSearch - 検索する駅名
  * @returns {Promise<string[]|null>}
  */
 async function searchStation(nameToSearch) {
     try {
-        const response = await axios.get('https://api.ekispert.jp/v1/json/station', {
+        // ★★★ ここのURLを軽量版に変えてみるで！ ★★★
+        const response = await axios.get('https://api.ekispert.jp/v1/json/station/light', {
             params: {
                 key: API_KEY,
                 name: nameToSearch,
-                type: 'train'
             }
         });
 
@@ -71,8 +71,9 @@ async function searchStation(nameToSearch) {
         const pointArray = Array.isArray(points) ? points : [points]; 
         
         pointArray.forEach(point => {
-            if (point.Station && point.Station.Line) {
-                const lines = Array.isArray(point.Station.Line) ? point.Station.Line : [point.Station.Line];
+            // 軽量版はレスポンスの形がちょっと違うから、合わせとく
+            if (point.Line) {
+                const lines = Array.isArray(point.Line) ? point.Line : [point.Line];
                 lines.forEach(line => {
                     allLines.push(line.Name);
                 });
@@ -82,13 +83,12 @@ async function searchStation(nameToSearch) {
         return [...new Set(allLines)];
 
     } catch (error) {
-        // 404 Not Foundのようなエラーは、ここでは「見つからなかった」として扱う
-        if (error.response && error.response.status !== 200) {
-            console.warn(`駅検索でAPIエラーが発生したけど、処理は続けるで: ${nameToSearch} (Status: ${error.response.status})`);
-            return null;
+        // もしまたエラーが出ても、原因がわかるようにもっと詳しくログを出すようにしとく
+        if (error.response) {
+            console.error(`駅検索でAPIエラー！ Status: ${error.response.status}, Data:`, error.response.data);
+        } else {
+            console.error(`駅情報の取得で致命的なエラーが発生: ${nameToSearch}`, error.message);
         }
-        // それ以外の致命的なエラーはちゃんとログに出す
-        console.error(`駅情報の取得で致命的なエラーが発生: ${nameToSearch}`, error.message);
         return null; // エラー時はnullを返す
     }
 }
