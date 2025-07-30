@@ -1,12 +1,14 @@
 // services/richMenu.js - リッチメニューを管理する専門家
 
 const { getClient } = require('./lineClient');
+const fs = require('fs');
+const path = require('path');
 
 // リッチメニューのデザイン
 const richMenu = {
     size: { width: 2500, height: 843 },
     selected: true,
-    name: "Okan AI Menu",
+    name: "Okan AI Menu v1",
     chatBarText: "おかんメニュー",
     areas: [
         {
@@ -34,23 +36,24 @@ const richMenu = {
 async function setupRichMenu() {
     const client = getClient();
     try {
-        // 1. 今あるメニューを全部削除して、きれいにしとく
+        const imagePath = path.join(__dirname, '..', 'richmenu.png');
+        if (!fs.existsSync(imagePath)) {
+            console.warn('リッチメニューの画像 `richmenu.png` が見つからへんで！画像なしで進めるわな。');
+            return;
+        }
+
         const existingMenus = await client.getRichMenuList();
         for (const menu of existingMenus) {
             await client.deleteRichMenu(menu.richMenuId);
         }
         console.log('古いリッチメニューを掃除したで。');
 
-        // 2. 新しいメニューのデザインを登録
         const richMenuId = await client.createRichMenu(richMenu);
         console.log(`新しいリッチメニューID: ${richMenuId}`);
 
-        // 3. メニューに画像をセット（今回はLINEが用意してくれてるサンプル画像を使う）
-        // ※ほんまは、あんたが作った画像をアップロードするんやで！
-        const imageResponse = await client.getRichMenuImage('DEFAULT_RICH_MENU_IMAGE'); // 仮の画像
-        await client.setRichMenuImage(richMenuId, imageResponse.data);
+        const imageBuffer = fs.readFileSync(imagePath);
+        await client.setRichMenuImage(richMenuId, imageBuffer, 'image/png');
         
-        // 4. このメニューを、これからの標準メニューにする
         await client.setDefaultRichMenu(richMenuId);
 
         console.log('🎉 新しいリッチメニューの準備ができたで！');

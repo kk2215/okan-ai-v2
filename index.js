@@ -1,13 +1,12 @@
-// index.js - おかんAIの司令塔 (Firebase版)
+// index.js - おかんAIの司令塔
 
 const express = require('express');
 const line = require('@line/bot-sdk');
 const { initializeApp, getClient } = require('./services/lineClient');
 const { initializeDb } = require('./services/firestore');
-const { initializeScheduler } = require('./scheduler'); // schedulerをインポート
+const { initializeScheduler } = require('./scheduler');
+// const { setupRichMenu } = require('./services/richMenu'); // 一旦お休み
 const handleEvent = require('./handlers/eventHandler');
-
-// --- 初期化処理 ---
 
 const config = {
     channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -16,11 +15,11 @@ const config = {
 
 initializeApp(config);
 initializeDb();
-initializeScheduler(); // スケジューラーを起動！
+initializeScheduler();
+// setupRichMenu(); // ここもお休みや
 
 const app = express();
 
-// --- Webhookエンドポイント ---
 app.post('/webhook', line.middleware(config), (req, res) => {
     const handleRequest = async () => {
         try {
@@ -34,7 +33,6 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     handleRequest();
 });
 
-// --- サーバー起動 ---
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`Okan AI is listening on port ${port}...`);
