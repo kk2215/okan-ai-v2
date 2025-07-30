@@ -25,7 +25,7 @@ function createAskGarbageDayOfWeekMessage(garbageType) {
                     },
                     {
                         type: 'text',
-                        text: 'ほな、それは何曜日や？下のボタンで教えてな。',
+                        text: 'ほな、それは何曜日や？下のボタンで教えてな。複数ある場合は、ぜんぶ押しといてな！',
                         wrap: true
                     }
                 ]
@@ -41,7 +41,7 @@ function createAskGarbageDayOfWeekMessage(garbageType) {
                         spacing: 'sm',
                         contents: days.slice(0, 4).map(d => ({
                             type: 'button',
-                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}` },
+                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}`, displayText: `${garbageType}は${d.label}` },
                             style: 'secondary'
                         }))
                     },
@@ -51,7 +51,7 @@ function createAskGarbageDayOfWeekMessage(garbageType) {
                         spacing: 'sm',
                         contents: days.slice(4, 7).map(d => ({
                             type: 'button',
-                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}` },
+                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}`, displayText: `${garbageType}は${d.label}` },
                             style: 'secondary'
                         }))
                     }
