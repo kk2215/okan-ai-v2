@@ -4,6 +4,7 @@ const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = req
 const { getLinesByStationName } = require('../services/heartrails');
 const { saveReminder } = require('../services/reminder');
 const { searchLocations } = require('../services/geocoding');
+const { extractReminders } = require('../services/languageApi'); // ★★★ 新しい頭脳を呼ぶ！ ★★★
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
@@ -12,7 +13,7 @@ const { createSetupCompleteMessage } = require('../templates/setupCompleteMessag
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
-const chrono = require('chrono-node');
+// chronoはもういらん！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -25,17 +26,16 @@ async function handleMessage(event, client) {
         // --- ステート（状態）に応じた会話の処理 ---
         if (user.state) {
             const state = user.state;
-            if (state === 'AWAITING_REMINDER') {
-                return await handleReminderInput(userId, messageText, client, event.replyToken, false);
-            }
-            if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
-                if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
+            if (state === 'AWAITING_REMINDER' || state === 'AWAITING_GARBAGE_DAY_INPUT') {
+                const isGarbageDayMode = state === 'AWAITING_GARBAGE_DAY_INPUT';
+                if (isGarbageDayMode && ['終わり', 'おわり', 'もうない'].includes(messageText)) {
                     await updateUserState(userId, null);
                     const finalMessage = createSetupCompleteMessage(user.displayName);
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
                 }
-                return await handleReminderInput(userId, messageText, client, event.replyToken, true);
+                return await handleReminderInput(userId, messageText, client, event.replyToken, isGarbageDayMode);
             }
+            
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -93,11 +93,13 @@ async function handleMessage(event, client) {
             }
         }
 
+        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
         if (proactiveReminderResult) {
             return;
         }
 
+        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -110,53 +112,33 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-    const referenceDate = new Date(nowInTokyoStr);
-    
-    const sentences = text.split(/、|。/g).filter(s => s.trim());
-    const remindersToConfirm = [];
+    const extracted = await extractReminders(text);
 
-    for (const sentence of sentences) {
-        const results = chrono.ja.parse(sentence, referenceDate, { forwardDate: true });
-        if (results.length === 0) continue;
-
-        const days = results.map(r => r.start);
-        let title = sentence;
-        results.forEach(r => {
-            title = title.replace(r.text, '');
-        });
-        title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
-        title = title.replace(/^(に|で|は|を)/, '').trim();
-
-        if (!title) continue;
-
-        for (const date of days) {
-            const reminderData = { title: title };
-            const parsedDate = date.date();
-            
-            if (date.isCertain('weekday')) {
-                reminderData.type = 'weekly';
-                reminderData.dayOfWeek = date.get('weekday');
-                if (!isGarbageDayMode) {
-                    reminderData.notificationTime = date.isCertain('hour')
-                        ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsedDate)
-                        : '08:00';
-                }
-            } else {
-                reminderData.type = 'once';
-                reminderData.targetDate = parsedDate.toISOString();
-            }
-            remindersToConfirm.push(reminderData);
-        }
-    }
-
-    if (remindersToConfirm.length === 0) {
+    if (!extracted || extracted.length === 0) {
         if (isGarbageDayMode) {
             await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
             return true;
         }
         return false;
     }
+    
+    const remindersToConfirm = extracted.map(item => {
+        const reminderData = { title: item.title };
+        const date = item.date;
+        
+        // Googleはんがくれた日付情報で、毎週か一回だけか判断する
+        // 時間の指定がなかったら（0時0分）、毎週のゴミの日とみなす
+        if (date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0) {
+            reminderData.type = 'weekly';
+            reminderData.dayOfWeek = date.getDay(); // 0が日曜、1が月曜...
+        } else {
+            reminderData.type = 'once';
+            reminderData.targetDate = date.toISOString();
+        }
+        return reminderData;
+    });
+
+    if (remindersToConfirm.length === 0) { return false; }
     
     const stateKey = isGarbageDayMode ? 'AWAITING_GARBAGE_CONFIRMATION' : 'AWAITING_REMINDER_CONFIRMATION';
     await updateUserState(userId, stateKey, { remindersData: remindersToConfirm });

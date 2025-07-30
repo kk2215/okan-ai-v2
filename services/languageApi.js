@@ -1,8 +1,7 @@
 // services/languageApi.js - Google Cloud Natural Language APIと通信する専門家
 
 const { LanguageServiceClient } = require('@google-cloud/language');
-const { v1 } = require('@google-cloud/language'); // v1クライアントも使う
-const languageClient = new v1.LanguageServiceClient();
+const languageClient = new LanguageServiceClient();
 
 /**
  * テキストを解析して、リマインダーの「内容」と「日時」を抜き出す
@@ -46,12 +45,12 @@ async function extractReminders(text) {
         
         return reminders;
 
-    } catch (error)
-    {console.error('Google Natural Language APIでエラーが発生:', error);
+    } catch (error) {
+        console.error('Google Natural Language APIでエラーが発生:', error);
         return null;
-    }  
-
+    }
+}
 
 module.exports = {
     extractReminders,
-};}
+};
