@@ -112,19 +112,27 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-    const referenceDate = new Date(nowInTokyoStr);
+    // ★★★ これが最後の作戦や！「日本の時間で考えや！」っておまじないをかける！ ★★★
+    const results = chrono.ja.parse(text, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
+
+    if (results.length === 0) {
+        if (isGarbageDayMode) {
+            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
+            return true;
+        }
+        return false;
+    }
     
     const sentences = text.split(/、|。/g).filter(s => s.trim());
     const remindersToConfirm = [];
 
     for (const sentence of sentences) {
-        const results = chrono.ja.parse(sentence, referenceDate, { forwardDate: true });
-        if (results.length === 0) continue;
+        const sentenceResults = chrono.ja.parse(sentence, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
+        if (sentenceResults.length === 0) continue;
 
-        const days = results.map(r => r.start);
+        const days = sentenceResults.map(r => r.start);
         let title = sentence;
-        results.forEach(r => {
+        sentenceResults.forEach(r => {
             title = title.replace(r.text, '');
         });
         title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
@@ -135,15 +143,6 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
         for (const date of days) {
             const reminderData = { title: title };
             const parsedDate = date.date();
-
-            if (date.isCertain('hour') && !date.isCertain('meridiem')) {
-                const hour = date.get('hour');
-                const currentHour = referenceDate.getHours();
-                if (hour < 12 && hour >= 5 && hour < currentHour) {
-                    date.assign('hour', hour + 12);
-                    date.assign('meridiem', 1);
-                }
-            }
             
             if (date.isCertain('weekday')) {
                 reminderData.type = 'weekly';
