@@ -112,18 +112,27 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    const referenceDate = new Date(); // 基準時間はサーバーの現在時刻(UTC)でOK
+    // ★★★ これが最後の作戦や！「日本の時間で考えや！」っておまじないをかける！ ★★★
+    const results = chrono.ja.parse(text, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
+
+    if (results.length === 0) {
+        if (isGarbageDayMode) {
+            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
+            return true;
+        }
+        return false;
+    }
     
     const sentences = text.split(/、|。/g).filter(s => s.trim());
     const remindersToConfirm = [];
 
     for (const sentence of sentences) {
-        const results = chrono.ja.parse(sentence, referenceDate, { forwardDate: true });
-        if (results.length === 0) continue;
+        const sentenceResults = chrono.ja.parse(sentence, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
+        if (sentenceResults.length === 0) continue;
 
-        const days = results.map(r => r.start);
+        const days = sentenceResults.map(r => r.start);
         let title = sentence;
-        results.forEach(r => {
+        sentenceResults.forEach(r => {
             title = title.replace(r.text, '');
         });
         title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
@@ -134,22 +143,18 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
         for (const date of days) {
             const reminderData = { title: title };
             const parsedDate = date.date();
-
-            // ★★★ これが最後の作戦や！時差を強制的に修正する！ ★★★
-            // chronoが作った日付はサーバーの時間(UTC)になっとるから、9時間引いて日本の時間に戻したる
-            const jstDate = new Date(parsedDate.getTime() - (9 * 60 * 60 * 1000));
             
             if (date.isCertain('weekday')) {
                 reminderData.type = 'weekly';
                 reminderData.dayOfWeek = date.get('weekday');
                 if (!isGarbageDayMode) {
                     reminderData.notificationTime = date.isCertain('hour')
-                        ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(jstDate)
+                        ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsedDate)
                         : '08:00';
                 }
             } else {
                 reminderData.type = 'once';
-                reminderData.targetDate = jstDate.toISOString();
+                reminderData.targetDate = parsedDate.toISOString();
             }
             remindersToConfirm.push(reminderData);
         }
