@@ -37,9 +37,12 @@ async function handlePostback(event, client) {
 
         // --- リマインダー確認ボタン ---
         if (action === 'confirm_reminder') {
-            const reminderData = user.tempData.reminderData;
-            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            await saveReminder(userId, reminderData);
+            const remindersData = user.tempData.remindersData;
+            if (!remindersData || remindersData.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            
+            for (const reminderData of remindersData) {
+                await saveReminder(userId, reminderData);
+            }
             
             if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
                 await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');

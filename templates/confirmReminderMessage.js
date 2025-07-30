@@ -1,29 +1,23 @@
 // templates/confirmReminderMessage.js - リマインダー内容の最終確認メッセージを作成
 
-// 日本の曜日の名前
-const dayOfWeekMap = ['(日)', '(月)', '(火)', '(水)', '(木)', '(金)', '(土)'];
+const { formatInTimeZone } = require('date-fns-tz');
 
-function createConfirmReminderMessage(reminderData) {
-    const { title, type, notificationTime, dayOfWeek, targetDate } = reminderData;
+function createConfirmReminderMessage(remindersData) {
+    const dayOfWeekMap = ['日曜', '月曜', '火曜', '水曜', '木曜', '金曜', '土曜'];
+    
+    // ★★★ 複数の予定をまとめて、一つの文章にする！ ★★★
+    const summary = remindersData.map(r => {
+        let whenText = '';
+        if (r.type === 'weekly') {
+            const time = r.notificationTime ? `の${r.notificationTime}頃` : 'の朝';
+            whenText = `毎週${dayOfWeekMap[r.dayOfWeek]}${time}`;
+        } else if (r.type === 'once') {
+            whenText = formatInTimeZone(new Date(r.targetDate), 'Asia/Tokyo', 'M月d日(E) HH:mm');
+        }
+        return `・${r.title} (${whenText})`;
+    }).join('\n');
 
-    let whenText = '';
-    if (type === 'weekly') {
-        const dayOfWeekJpMap = ['日曜', '月曜', '火曜', '水曜', '木曜', '金曜', '土曜'];
-        whenText = `毎週${dayOfWeekJpMap[dayOfWeek]}の${notificationTime}頃`;
-    } else if (type === 'once') {
-        const date = new Date(targetDate);
-        // 日本の時間として表示するためのオプション
-        const options = { 
-            timeZone: 'Asia/Tokyo', 
-            year: 'numeric', month: 'long', day: 'numeric', 
-            hour: '2-digit', minute: '2-digit', hour12: false 
-        };
-        const formattedDate = new Intl.DateTimeFormat('ja-JP', options).format(date);
-        const day = dayOfWeekMap[date.getDay()];
-        whenText = `${formattedDate} ${day}`;
-    }
-
-    const confirmText = `「${title}」やな。\n${whenText}に教えたらええんか？`;
+    const confirmText = `下の予定で登録するで。ええか？\n\n${summary}`;
 
     return {
         type: 'flex',
