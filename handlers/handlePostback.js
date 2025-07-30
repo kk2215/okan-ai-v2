@@ -1,10 +1,11 @@
 // handlers/handlePostback.js - ボタン押下（ポストバックイベント）の処理を担当
 
 const { getUser, updateUserState, updateUserNotificationTime, saveUserTrainLines, updateUserLocation } = require('../services/user');
-const { saveReminder } = require('../services/reminder');
+const { saveReminder, getReminders, deleteReminder } = require('../services/reminder');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createTrainLineConfirmationMessage } = require('../templates/trainLineConfirmationMessage');
+const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -15,7 +16,50 @@ async function handlePostback(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- 地域選択ボタン ---
+        // --- リマインダーメニューのボタン処理 ---
+        if (action === 'new_reminder') {
+            await updateUserState(userId, 'AWAITING_REMINDER');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何をいつ教えたらええ？\n「明日の15時に会議」みたいに教えてな。' });
+        }
+        if (action === 'list_reminders') {
+            const reminders = await getReminders(userId);
+            if (reminders.length === 0) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: '今は登録されとる予定、ないみたいやで。' });
+            }
+            const listMessage = createListRemindersMessage(reminders);
+            return client.replyMessage(event.replyToken, listMessage);
+        }
+        if (action === 'delete_reminder') {
+            const reminderId = data.get('id');
+            await deleteReminder(userId, reminderId);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、その予定は消しといたで！' });
+        }
+
+        // --- リマインダー確認ボタン ---
+        if (action === 'confirm_reminder') {
+            const reminderData = user.tempData.reminderData;
+            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            await saveReminder(userId, reminderData);
+            
+            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
+                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
+            } else {
+                await updateUserState(userId, null);
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
+            }
+        }
+        if (action === 'cancel_reminder') {
+            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
+                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。他にはあるか？' });
+            } else {
+                await updateUserState(userId, null);
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
+            }
+        }
+
+        // --- 初期設定フローのボタン ---
         if (action === 'select_location') {
             const locationIndex = parseInt(data.get('index'), 10);
             const locations = user.tempData.locations;
@@ -29,8 +73,6 @@ async function handlePostback(event, client) {
             const nextMessage = createAskNotificationTimeMessage();
             return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
         }
-
-        // --- 通知時間設定ボタン ---
         if (action === 'set_notification_time') {
             const time = event.postback.params.time;
             await updateUserNotificationTime(userId, time);
@@ -46,8 +88,6 @@ async function handlePostback(event, client) {
                 }
             });
         }
-
-        // --- 路線選択ボタン ---
         if (action === 'add_line') {
             const lineToAdd = data.get('line');
             let selectedLines = user.tempData.selectedLines || [];
@@ -74,39 +114,6 @@ async function handlePostback(event, client) {
              await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
              const nextMessage = createAskGarbageDayMessage();
              return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ほな、やめとこか。' }, nextMessage]);
-        }
-        
-        // --- リマインダーメニューのボタン ---
-        if (action === 'new_reminder') {
-            await updateUserState(userId, 'AWAITING_REMINDER');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何をいつ教えたらええ？\n「毎週火曜の朝に燃えるゴミ」とか「明日の15時に会議」みたいに教えてな。' });
-        }
-        if (action === 'list_reminders') {
-            return client.replyMessage(event.replyToken, { type: 'text', text: '登録した予定を見る機能は、今準備中やねん。もうちょい待っといてな！' });
-        }
-
-        // --- リマインダー確認ボタン ---
-        if (action === 'confirm_reminder') {
-            const reminderData = user.tempData.reminderData;
-            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            await saveReminder(userId, reminderData);
-            
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
-            }
-        }
-        if (action === 'cancel_reminder') {
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。他にはあるか？' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
-            }
         }
 
     } catch (error) {

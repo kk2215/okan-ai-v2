@@ -13,7 +13,6 @@ const { createConfirmReminderMessage } = require('../templates/confirmReminderMe
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const chrono = require('chrono-node');
-// もう時差ボケを直す道具には頼らへん！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -118,7 +117,6 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    // ★★★ これが最後の作戦や！自力で日本の時間を計算する！ ★★★
     const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
     const referenceDate = new Date(nowInTokyoStr);
     
@@ -161,7 +159,9 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
     if (result.start.isCertain('weekday')) {
         reminderData.type = 'weekly';
         reminderData.dayOfWeek = date.get('weekday');
-        reminderData.notificationTime = date.isCertain('hour') ? `${String(date.get('hour')).padStart(2, '0')}:${String(date.get('minute')).padStart(2, '0')}` : '08:00';
+        if (!isGarbageDayMode) {
+             reminderData.notificationTime = date.isCertain('hour') ? `${String(date.get('hour')).padStart(2, '0')}:${String(date.get('minute')).padStart(2, '0')}` : '08:00';
+        }
     } else {
         reminderData.type = 'once';
         reminderData.targetDate = date.date().toISOString();

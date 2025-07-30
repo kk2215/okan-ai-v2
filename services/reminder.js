@@ -1,7 +1,7 @@
 // services/reminder.js - リマインダー情報のデータベース操作を担当
 
 const { getDb, FieldValue } = require('./firestore');
-// もう時差ボケを直す道具には頼らへん！
+const { utcToZonedTime } = require('date-fns-tz');
 
 const USERS_COLLECTION = 'users';
 const REMINDERS_COLLECTION = 'reminders';
@@ -24,7 +24,6 @@ async function saveReminder(userId, reminderData) {
         lastNotifiedAt: null,
     };
     
-    // targetDateが文字列で来たらDateオブジェクトに変換
     if (dataToSave.targetDate && typeof dataToSave.targetDate === 'string') {
         dataToSave.targetDate = new Date(dataToSave.targetDate);
     }
@@ -83,8 +82,22 @@ async function updateLastNotified(userId, reminderId, deactivate = false) {
     await reminderRef.update(updateData);
 }
 
+/**
+ * 指定されたリマインダーを削除する
+ * @param {string} userId
+ * @param {string} reminderId
+ */
+async function deleteReminder(userId, reminderId) {
+    const db = getDb();
+    await db.collection(USERS_COLLECTION).doc(userId)
+            .collection(REMINDERS_COLLECTION).doc(reminderId)
+            .delete();
+    console.log(`リマインダーを削除しました: ${userId} -> ${reminderId}`);
+}
+
 module.exports = {
     saveReminder,
     getReminders,
     updateLastNotified,
+    deleteReminder,
 };
