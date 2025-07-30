@@ -13,7 +13,7 @@ const { createConfirmReminderMessage } = require('../templates/confirmReminderMe
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const chrono = require('chrono-node');
-const { utcToZonedTime } = require('date-fns-tz');
+// もう時差ボケを直す道具には頼らへん！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -36,9 +36,51 @@ async function handleMessage(event, client) {
         // --- 初期設定フロー ---
         if (user.state) {
             const state = user.state;
-            if (state === 'AWAITING_LOCATION') { /* (省略) */ }
-            if (state === 'AWAITING_TRAIN_LINE') { /* (省略) */ }
-            if (state === 'AWAITING_STATIONS') { /* (省略) */ }
+            if (state === 'AWAITING_LOCATION') {
+                const locations = await searchLocations(messageText);
+                if (!locations || locations.length === 0) {
+                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${messageText}」っていう場所、見つけられへんかったわ…。もう一回、市町村名から教えてくれるか？` });
+                }
+                if (locations.length === 1) {
+                    const location = locations[0];
+                    await updateUserLocation(userId, location.locationForWeather);
+                    await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
+                    const replyText = `「${location.formattedAddress}」やね、覚えたで！`;
+                    const nextMessage = createAskNotificationTimeMessage();
+                    return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
+                }
+                await updateUserState(userId, 'AWAITING_LOCATION_SELECTION', { locations: locations });
+                const selectionMessage = createLocationSelectionMessage(locations);
+                return client.replyMessage(event.replyToken, selectionMessage);
+            }
+            if (state === 'AWAITING_TRAIN_LINE') {
+                if (messageText === '電車の設定する') {
+                    await updateUserState(userId, 'AWAITING_STATIONS');
+                    const nextMessage = createAskStationsMessage();
+                    return client.replyMessage(event.replyToken, nextMessage);
+                } else {
+                    await saveUserTrainLines(userId, []);
+                    await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
+                    const nextMessage = createAskGarbageDayMessage();
+                    return client.replyMessage(event.replyToken, [{ type: 'text', text: '電車はええのね。ほな次いこか！' }, nextMessage]);
+                }
+            }
+            if (state === 'AWAITING_STATIONS') {
+                const stations = messageText.split(/から|まで/g).map(s => s.trim()).filter(Boolean);
+                if (stations.length < 2) {
+                    return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「和光市から巣鴨」みたいにもう一回教えてくれるか？' });
+                }
+                const [from, to] = stations;
+                const linesFrom = await getLinesByStationName(from);
+                const linesTo = await getLinesByStationName(to);
+                if ((!linesFrom || linesFrom.length === 0) && (!linesTo || linesTo.length === 0)) {
+                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」も「${to}」も見つからんかったわ…駅の名前、間違えてへんか？` });
+                }
+                const allLines = [...new Set([...(linesFrom || []), ...(linesTo || [])])];
+                await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
+                const selectionMessage = createLineSelectionMessage(allLines);
+                return client.replyMessage(event.replyToken, selectionMessage);
+            }
             if (state === 'AWAITING_GARBAGE_DAY') {
                 if (messageText === 'ゴミの日を設定する') {
                     await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
@@ -49,7 +91,6 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, finalMessage);
                 }
             }
-            // 新しい状態：ゴミの日を連続で待つ
             if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
                 if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
                     await updateUserState(userId, null);
@@ -60,13 +101,11 @@ async function handleMessage(event, client) {
             }
         }
 
-        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
         if (proactiveReminderResult) {
             return;
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -79,7 +118,10 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
+    // ★★★ これが最後の作戦や！自力で日本の時間を計算する！ ★★★
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const referenceDate = new Date(nowInTokyoStr);
+    
     const results = chrono.ja.parse(text, referenceDate, { forwardDate: true });
 
     if (results.length === 0) {
@@ -125,7 +167,6 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
         reminderData.targetDate = date.date().toISOString();
     }
     
-    // isGarbageDayModeで確認メッセージを変える
     const stateKey = isGarbageDayMode ? 'AWAITING_GARBAGE_CONFIRMATION' : 'AWAITING_REMINDER_CONFIRMATION';
     await updateUserState(userId, stateKey, { reminderData });
     const confirmMessage = createConfirmReminderMessage(reminderData);
