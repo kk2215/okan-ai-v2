@@ -3,16 +3,16 @@
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { getLinesByStationName } = require('../services/heartrails');
 const { saveReminder } = require('../services/reminder');
-const { searchLocations } = require('../services/geocoding'); // ★★★ なくしてた連絡先、ここに追加したで！ ★★★
+const { searchLocations } = require('../services/geocoding');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
-const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage'); // ★★★ こっちもなくしとったわ！ごめんな！ ★★★
+const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const chrono = require('chrono-node');
-const { utcToZonedTime } = require('date-fns-tz');
+// もう時差ボケを直す道具には頼らへん！自力で計算するで！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -26,7 +26,6 @@ async function handleMessage(event, client) {
         if (user.state) {
             const state = user.state;
 
-            // リマインダーの内容を具体的に聞かれてる時
             if (state === 'AWAITING_REMINDER') {
                 return await handleReminderInput(userId, messageText, client, event.replyToken);
             }
@@ -88,13 +87,11 @@ async function handleMessage(event, client) {
             }
         }
 
-        // --- ★★★ ここからが新しい読心術や！ ★★★ ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken);
         if (proactiveReminderResult) {
             return;
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -107,7 +104,10 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken) {
-    const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
+    // ★★★ これが最後の作戦や！自力で日本の時間を計算する！ ★★★
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const referenceDate = new Date(nowInTokyoStr);
+    
     const results = chrono.ja.parse(text, referenceDate, { forwardDate: true });
 
     if (results.length === 0) {
