@@ -1,7 +1,6 @@
 // services/reminder.js - リマインダー情報のデータベース操作を担当
 
 const { getDb, FieldValue } = require('./firestore');
-const { utcToZonedTime } = require('date-fns-tz');
 
 const USERS_COLLECTION = 'users';
 const REMINDERS_COLLECTION = 'reminders';
