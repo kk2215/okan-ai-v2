@@ -22,19 +22,25 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能 ---
-        const reminderKeywords = ['リマインド', 'リマインダー', '教えて', 'アラーム', '予定'];
-        if (!user.state && reminderKeywords.some(keyword => messageText.includes(keyword))) {
-            const reminderMenu = createReminderMenuMessage();
-            return client.replyMessage(event.replyToken, reminderMenu);
-        }
-        if (user.state === 'AWAITING_REMINDER') {
-            return await handleReminderInput(userId, messageText, client, event.replyToken, false);
-        }
-
-        // --- 初期設定フロー ---
+        // --- ステート（状態）に応じた会話の処理 ---
         if (user.state) {
             const state = user.state;
+
+            // リマインダーの内容を具体的に聞かれてる時
+            if (state === 'AWAITING_REMINDER') {
+                return await handleReminderInput(userId, messageText, client, event.replyToken, false);
+            }
+            // ゴミの日の内容を具体的に聞かれてる時
+            if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
+                if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
+                    await updateUserState(userId, null);
+                    const finalMessage = createSetupCompleteMessage(user.displayName);
+                    return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
+                }
+                return await handleReminderInput(userId, messageText, client, event.replyToken, true);
+            }
+            
+            // (↓ここから下は、初期設定の会話)
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -83,28 +89,22 @@ async function handleMessage(event, client) {
             if (state === 'AWAITING_GARBAGE_DAY') {
                 if (messageText === 'ゴミの日を設定する') {
                     await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                    return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！収集日を教えてや。\n「毎週火曜に燃えるゴミ」みたいに、一つずつ言うてな。終わったら「終わり」って言うてや。' });
+                    return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！収集日を教えてや。\n「毎週火曜は燃えるゴミ」みたいに、一つずつ言うてな。終わったら「終わり」って言うてや。' });
                 } else {
                     await updateUserState(userId, null);
                     const finalMessage = createSetupCompleteMessage(user.displayName);
                     return client.replyMessage(event.replyToken, finalMessage);
                 }
             }
-            if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
-                if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
-                    await updateUserState(userId, null);
-                    const finalMessage = createSetupCompleteMessage(user.displayName);
-                    return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
-                }
-                return await handleReminderInput(userId, messageText, client, event.replyToken, true);
-            }
         }
 
+        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
         if (proactiveReminderResult) {
             return;
         }
 
+        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -124,13 +124,14 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
 
     if (results.length === 0) {
         if (isGarbageDayMode) {
-            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜に燃えるゴミ」みたいに教えてくれるか？' });
+            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
             return true;
         }
         return false;
     }
     
     const result = results[0];
+    const parsedDate = result.start.date();
     
     let title = text.replace(result.text, '').trim();
     title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと)$/, '').trim();
@@ -145,26 +146,18 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
     }
 
     const reminderData = { title: title };
-    const date = result.start;
-
-    if (date.isCertain('hour') && !date.isCertain('meridiem')) {
-        const hour = date.get('hour');
-        const currentHour = referenceDate.getHours();
-        if (hour < 12 && hour >= 5 && hour < currentHour) {
-            date.assign('hour', hour + 12);
-            date.assign('meridiem', 1);
-        }
-    }
     
     if (result.start.isCertain('weekday')) {
         reminderData.type = 'weekly';
-        reminderData.dayOfWeek = date.get('weekday');
+        reminderData.dayOfWeek = result.start.get('weekday');
         if (!isGarbageDayMode) {
-             reminderData.notificationTime = date.isCertain('hour') ? `${String(date.get('hour')).padStart(2, '0')}:${String(date.get('minute')).padStart(2, '0')}` : '08:00';
+             reminderData.notificationTime = result.start.isCertain('hour')
+                ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsedDate)
+                : '08:00';
         }
     } else {
         reminderData.type = 'once';
-        reminderData.targetDate = date.date().toISOString();
+        reminderData.targetDate = parsedDate.toISOString();
     }
     
     const stateKey = isGarbageDayMode ? 'AWAITING_GARBAGE_CONFIRMATION' : 'AWAITING_REMINDER_CONFIRMATION';
