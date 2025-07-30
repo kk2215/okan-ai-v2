@@ -1,6 +1,7 @@
 // services/reminder.js - リマインダー情報のデータベース操作を担当
 
 const { getDb, FieldValue } = require('./firestore');
+// もう時差ボケを直す道具には頼らへん！
 
 const USERS_COLLECTION = 'users';
 const REMINDERS_COLLECTION = 'reminders';
@@ -23,6 +24,7 @@ async function saveReminder(userId, reminderData) {
         lastNotifiedAt: null,
     };
     
+    // targetDateが文字列で来たらDateオブジェクトに変換
     if (dataToSave.targetDate && typeof dataToSave.targetDate === 'string') {
         dataToSave.targetDate = new Date(dataToSave.targetDate);
     }

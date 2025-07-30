@@ -13,7 +13,7 @@ const { createConfirmReminderMessage } = require('../templates/confirmReminderMe
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const chrono = require('chrono-node');
-const { utcToZonedTime } = require('date-fns-tz');
+// もう時差ボケを直す道具には頼らへん！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -23,19 +23,20 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能 ---
-        const reminderKeywords = ['リマインド', 'リマインダー', '教えて', 'アラーム', '予定'];
-        if (!user.state && reminderKeywords.some(keyword => messageText.includes(keyword))) {
-            const reminderMenu = createReminderMenuMessage();
-            return client.replyMessage(event.replyToken, reminderMenu);
-        }
-        if (user.state === 'AWAITING_REMINDER') {
-            return await handleReminderInput(userId, messageText, client, event.replyToken, false);
-        }
-
-        // --- 初期設定フロー ---
+        // --- ステート（状態）に応じた会話の処理 ---
         if (user.state) {
             const state = user.state;
+            if (state === 'AWAITING_REMINDER') {
+                return await handleReminderInput(userId, messageText, client, event.replyToken, false);
+            }
+            if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
+                if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
+                    await updateUserState(userId, null);
+                    const finalMessage = createSetupCompleteMessage(user.displayName);
+                    return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
+                }
+                return await handleReminderInput(userId, messageText, client, event.replyToken, true);
+            }
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -91,14 +92,6 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, finalMessage);
                 }
             }
-            if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
-                if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
-                    await updateUserState(userId, null);
-                    const finalMessage = createSetupCompleteMessage(user.displayName);
-                    return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
-                }
-                return await handleReminderInput(userId, messageText, client, event.replyToken, true);
-            }
         }
 
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
@@ -118,7 +111,9 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
+    // ★★★ これが最後の作戦や！自力で日本の時間を計算する！ ★★★
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const referenceDate = new Date(nowInTokyoStr);
     
     const sentences = text.split(/、|。/g).filter(s => s.trim());
     const remindersToConfirm = [];
