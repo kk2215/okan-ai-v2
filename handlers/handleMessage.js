@@ -3,12 +3,14 @@
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { getLinesByStationName } = require('../services/heartrails');
 const { saveReminder } = require('../services/reminder');
+const { searchLocations } = require('../services/geocoding'); // ★★★ なくしてた連絡先、ここに追加したで！ ★★★
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
+const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage'); // ★★★ こっちもなくしとったわ！ごめんな！ ★★★
 const chrono = require('chrono-node');
 const { utcToZonedTime } = require('date-fns-tz');
 
@@ -29,7 +31,6 @@ async function handleMessage(event, client) {
                 return await handleReminderInput(userId, messageText, client, event.replyToken);
             }
             
-            // (↓ここから下は、初期設定の会話やから変更なし)
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -88,10 +89,8 @@ async function handleMessage(event, client) {
         }
 
         // --- ★★★ ここからが新しい読心術や！ ★★★ ---
-        // 通常の会話の中に、リマインドしてほしいことが隠れてないか、毎回チェックする
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken);
         if (proactiveReminderResult) {
-            // リマインダーとして解釈できたら、それで会話は終わり
             return;
         }
 
@@ -111,18 +110,15 @@ async function handleReminderInput(userId, text, client, replyToken) {
     const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
     const results = chrono.ja.parse(text, referenceDate, { forwardDate: true });
 
-    // 「いつ」がわからんかったら、リマインダーとは判断せえへん
     if (results.length === 0) {
         return false;
     }
     
     const result = results[0];
     
-    // 「何を」を賢く抜き出す
     let title = text.substring(0, result.index) + text.substring(result.index + result.text.length);
     title = title.replace(/で?に?、?を?(リマインド|リマインダー|教えて|アラーム|って|のこと)/, '').trim();
 
-    // 「何を」がわからんかったら、リマインダーとは判断せえへん
     if (!title) {
         return false;
     }
@@ -130,20 +126,19 @@ async function handleReminderInput(userId, text, client, replyToken) {
     const reminderData = { title: title };
     const date = result.start;
     
-    if (result.start.isCertain('weekday')) { // 毎週〇曜日
+    if (result.start.isCertain('weekday')) {
         reminderData.type = 'weekly';
         reminderData.dayOfWeek = date.get('weekday');
         reminderData.notificationTime = date.isCertain('hour') ? `${String(date.get('hour')).padStart(2, '0')}:${String(date.get('minute')).padStart(2, '0')}` : '08:00';
-    } else { // 一回だけ
+    } else {
         reminderData.type = 'once';
         reminderData.targetDate = date.date().toISOString();
     }
     
-    // 最終確認するで
     await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData });
     const confirmMessage = createConfirmReminderMessage(reminderData);
     await client.replyMessage(replyToken, confirmMessage);
-    return true; // リマインダーとして処理できたで！という合図
+    return true;
 }
 
 module.exports = handleMessage;
