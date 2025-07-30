@@ -22,7 +22,6 @@ async function handlePostback(event, client) {
             const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
             
             let selectedDays = user.tempData.selectedDays || [];
-            // 既に選ばれてたら削除、なかったら追加する（トグル機能）
             if (selectedDays.includes(dayOfWeek)) {
                 selectedDays = selectedDays.filter(d => d !== dayOfWeek);
             } else {
@@ -31,9 +30,7 @@ async function handlePostback(event, client) {
             
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
             
-            // 押したことがわかるように、返事だけする
-            // メッセージは更新されへんけど、これで十分やろ
-            return client.replyMessage(event.replyToken, { type: 'text', text: `「${dayMap[dayOfWeek]}」やな！` });
+            return client.replyMessage(event.replyToken, { type: 'text', text: `「${dayMap[dayOfWeek]}」を追加したで！` });
         }
 
         // --- ゴミの日登録（曜日決定） ---
