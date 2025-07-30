@@ -16,24 +16,43 @@ async function handlePostback(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // ★★★ 新しい仕事：ゴミの日の曜日選択ボタン ★★★
+        // --- ゴミの日登録（曜日選択） ---
         if (action === 'set_garbage_day') {
             const dayOfWeek = parseInt(data.get('day'), 10);
-            const garbageType = user.tempData.garbageType;
+            const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
+            
+            let selectedDays = user.tempData.selectedDays || [];
+            if (!selectedDays.includes(dayOfWeek)) {
+                selectedDays.push(dayOfWeek);
+            }
+            
+            await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
+            
+            return client.replyMessage(event.replyToken, { type: 'text', text: `「${dayMap[dayOfWeek]}」を追加したで！` });
+        }
 
-            if (!garbageType) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんのゴミか忘れてもうたわ…もう一回、名前から教えてくれるか？' });
+        // --- ゴミの日登録（曜日決定） ---
+        if (action === 'confirm_garbage_days') {
+            const garbageType = user.tempData.garbageType;
+            const selectedDays = user.tempData.selectedDays;
+
+            if (!garbageType || !selectedDays || selectedDays.length === 0) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんのゴミか、何曜日か忘れてもうたわ…もう一回、名前から教えてくれるか？' });
             }
 
-            await saveReminder(userId, {
-                title: garbageType,
-                type: 'weekly',
-                dayOfWeek: dayOfWeek,
-            });
+            for (const day of selectedDays) {
+                await saveReminder(userId, {
+                    title: garbageType,
+                    type: 'weekly',
+                    dayOfWeek: day,
+                });
+            }
+            
+            const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
+            const registeredDays = selectedDays.map(d => dayMap[d]).join('と');
 
-            // 続けて他のゴミも登録できるように、またゴミの種類を聞く状態に戻す
             await updateUserState(userId, 'AWAITING_GARBAGE_TYPE');
-            return client.replyMessage(event.replyToken, { type: 'text', text: `よっしゃ、「${garbageType}」は${['日曜','月曜','火曜','水曜','木曜','金曜','土曜'][dayOfWeek]}やな！\n\n他にはあるか？なかったら「終わり」って言うてな。` });
+            return client.replyMessage(event.replyToken, { type: 'text', text: `よっしゃ、「${garbageType}」は${registeredDays}やな！\n\n他にはあるか？なかったら「終わり」って言うてな。` });
         }
 
         // --- リマインダーメニューのボタン処理 ---

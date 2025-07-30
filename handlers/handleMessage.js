@@ -12,7 +12,7 @@ const { createSetupCompleteMessage } = require('../templates/setupCompleteMessag
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
-const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage'); // 新しい設計図
+const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const chrono = require('chrono-node');
 const dateFnsTz = require('date-fns-tz');
 
@@ -30,7 +30,8 @@ async function handleMessage(event, client) {
             if (state === 'AWAITING_REMINDER') {
                 return await handleReminderInput(userId, messageText, client, event.replyToken, false);
             }
-            // ★★★ ゴミの日の流れを、ここから大改造や！ ★★★
+            
+            // --- ゴミの日登録フロー ---
             if (state === 'AWAITING_GARBAGE_DAY') {
                 if (messageText === 'ゴミの日を設定する') {
                     await updateUserState(userId, 'AWAITING_GARBAGE_TYPE');
@@ -47,13 +48,13 @@ async function handleMessage(event, client) {
                     const finalMessage = createSetupCompleteMessage(user.displayName);
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
                 }
-                // 聞いたゴミの名前を一時的に覚えとく
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { garbageType: messageText });
+                // 聞いたゴミの名前と、空っぽの曜日リストを一時的に覚えとく
+                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { garbageType: messageText, selectedDays: [] });
                 const daySelectionMessage = createAskGarbageDayOfWeekMessage(messageText);
                 return client.replyMessage(event.replyToken, daySelectionMessage);
             }
             
-            // (↓ここから下は、初期設定の会話やから変更なし)
+            // --- その他の初期設定フロー ---
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {

@@ -25,7 +25,7 @@ function createAskGarbageDayOfWeekMessage(garbageType) {
                     },
                     {
                         type: 'text',
-                        text: 'ほな、それは何曜日や？下のボタンで教えてな。複数ある場合は、ぜんぶ押しといてな！',
+                        text: '収集日を下のボタンで全部教えてな。押し終わったら「これで決定」やで。',
                         wrap: true
                     }
                 ]
@@ -41,7 +41,7 @@ function createAskGarbageDayOfWeekMessage(garbageType) {
                         spacing: 'sm',
                         contents: days.slice(0, 4).map(d => ({
                             type: 'button',
-                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}`, displayText: `${garbageType}は${d.label}` },
+                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}`, displayText: `${garbageType}に${d.label}を追加` },
                             style: 'secondary'
                         }))
                     },
@@ -51,9 +51,25 @@ function createAskGarbageDayOfWeekMessage(garbageType) {
                         spacing: 'sm',
                         contents: days.slice(4, 7).map(d => ({
                             type: 'button',
-                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}`, displayText: `${garbageType}は${d.label}` },
+                            action: { type: 'postback', label: d.label, data: `action=set_garbage_day&day=${d.day}`, displayText: `${garbageType}に${d.label}を追加` },
                             style: 'secondary'
                         }))
+                    },
+                    {
+                        type: 'separator',
+                        margin: 'md'
+                    },
+                    {
+                        type: 'button',
+                        action: {
+                            type: 'postback',
+                            label: 'これで決定',
+                            data: 'action=confirm_garbage_days',
+                            displayText: 'ゴミの日の曜日を決定する'
+                        },
+                        style: 'primary',
+                        color: '#ff5722',
+                        margin: 'md'
                     }
                 ]
             }
