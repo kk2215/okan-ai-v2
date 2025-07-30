@@ -11,8 +11,9 @@ const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessag
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
+const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const chrono = require('chrono-node');
-const { utcToZonedTime } = require('date-fns-tz');
+// もう時差ボケを直す道具には頼らへん！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -22,7 +23,12 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダーの内容入力待ちの場合 ---
+        // --- リマインダー機能 ---
+        const reminderKeywords = ['リマインド', 'リマインダー', '教えて', 'アラーム', '予定'];
+        if (!user.state && reminderKeywords.some(keyword => messageText.includes(keyword))) {
+            const reminderMenu = createReminderMenuMessage();
+            return client.replyMessage(event.replyToken, reminderMenu);
+        }
         if (user.state === 'AWAITING_REMINDER') {
             return await handleReminderInput(userId, messageText, client, event.replyToken);
         }
@@ -87,13 +93,11 @@ async function handleMessage(event, client) {
             }
         }
 
-        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken);
         if (proactiveReminderResult) {
             return;
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -106,14 +110,16 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken) {
-    const referenceDate = utcToZonedTime(new Date(), 'Asia/Tokyo');
+    // ★★★ これが最後の作戦や！自力で日本の時間を計算する！ ★★★
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const referenceDate = new Date(nowInTokyoStr);
+    
     const results = chrono.ja.parse(text, referenceDate, { forwardDate: true });
 
     if (results.length === 0) { return false; }
     
     const result = results[0];
     
-    // ★★★ 国語の特別授業の成果 その１：賢い内容の抜き出し方 ★★★
     let title = text.replace(result.text, '').trim();
     title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと)$/, '').trim();
     title = title.replace(/^(に|で|は|を)/, '').trim();
@@ -123,15 +129,12 @@ async function handleReminderInput(userId, text, client, replyToken) {
     const reminderData = { title: title };
     const date = result.start;
 
-    // ★★★ 国語の特別授業の成果 その２：賢い時間の推測 ★★★
-    // 「5時」みたいに午前か午後かわからん時間を、ええ感じに推測する
     if (date.isCertain('hour') && !date.isCertain('meridiem')) {
         const hour = date.get('hour');
         const currentHour = referenceDate.getHours();
-        // 朝(5時以降)に「5時」と言ったら、夕方の5時のことやろな、と推測
         if (hour < 12 && hour >= 5 && hour < currentHour) {
             date.assign('hour', hour + 12);
-            date.assign('meridiem', 1); // PM
+            date.assign('meridiem', 1);
         }
     }
     
