@@ -1,8 +1,22 @@
 // services/geocoding.js - Google Geocoding APIと通信する専門家
 
-const axios = require('axios');
+const { Client } = require("@googlemaps/google-maps-services-js");
 
-const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+// ★★★ これが最後の作戦や！APIキーやのうて、ちゃんと紹介状(サービスアカウント)で挨拶する！ ★★★
+let mapsClient;
+let serviceAccountKey;
+
+try {
+    // Firebaseで使っとるのと同じサービスアカウント情報（紹介状）を読み込む
+    serviceAccountKey = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    
+    // Google Mapsのプロ用道具を準備
+    mapsClient = new Client({});
+    console.log('地名のプロ（Googleはん）、厨房にお迎えしたで！');
+
+} catch (error) {
+    console.error('地名のプロを呼んでくるのに失敗したわ… FIREBASE_SERVICE_ACCOUNTの設定、もう一回確認してくれるか？', error);
+}
 
 /**
  * 地名から場所の候補リストを取得する
@@ -10,19 +24,20 @@ const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
  * @returns {Promise<Array|null>} 場所の候補オブジェクトの配列
  */
 async function searchLocations(address) {
-    if (!API_KEY) {
-        console.error('Google MapsのAPIキーが設定されてへんで！');
+    if (!mapsClient) {
+        console.error('Maps Clientが準備できてへんから、場所は探されへんわ。');
         return null;
     }
 
     try {
-        const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        const response = await mapsClient.geocode({
             params: {
                 address: address,
                 language: 'ja',
-                region: 'jp', // 日本国内に限定
-                key: API_KEY,
-            }
+                region: 'jp',
+                key: serviceAccountKey.private_key // ★★★ ここで紹介状の代わりにAPIキーを使うんや！
+            },
+            timeout: 1000, // タイムアウトを1秒に設定
         });
 
         if (response.data.status !== 'OK' || !response.data.results || response.data.results.length === 0) {
@@ -30,11 +45,8 @@ async function searchLocations(address) {
             return [];
         }
 
-        // 必要な情報だけを抜き出して返す
         return response.data.results.map(result => ({
-            // 天気予報APIで使える形式（例: Suginami, Tokyo, JP）
             locationForWeather: `${result.address_components[0].long_name},JP`,
-            // ユーザーに見せるための分かりやすい住所（例: 日本、〒166-8570 東京都杉並区阿佐谷南１丁目１５−１）
             formattedAddress: result.formatted_address,
         }));
 
