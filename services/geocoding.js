@@ -2,20 +2,14 @@
 
 const { Client } = require("@googlemaps/google-maps-services-js");
 
-// ★★★ これが最後の作戦や！APIキーやのうて、ちゃんと紹介状(サービスアカウント)で挨拶する！ ★★★
+// ★★★ これがほんまの最後の作戦や！ちゃんと専用のAPIキーで挨拶する！ ★★★
 let mapsClient;
-let serviceAccountKey;
 
-try {
-    // Firebaseで使っとるのと同じサービスアカウント情報（紹介状）を読み込む
-    serviceAccountKey = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    
-    // Google Mapsのプロ用道具を準備
+if (process.env.GOOGLE_MAPS_API_KEY) {
     mapsClient = new Client({});
     console.log('地名のプロ（Googleはん）、厨房にお迎えしたで！');
-
-} catch (error) {
-    console.error('地名のプロを呼んでくるのに失敗したわ… FIREBASE_SERVICE_ACCOUNTの設定、もう一回確認してくれるか？', error);
+} else {
+    console.error('地名のプロを呼んでくるのに失敗したわ… GOOGLE_MAPS_API_KEYの設定、もう一回確認してくれるか？');
 }
 
 /**
@@ -35,9 +29,9 @@ async function searchLocations(address) {
                 address: address,
                 language: 'ja',
                 region: 'jp',
-                key: serviceAccountKey.private_key // ★★★ ここで紹介状の代わりにAPIキーを使うんや！
+                key: process.env.GOOGLE_MAPS_API_KEY // ★★★ ここで、ちゃんと専用のAPIキーを使うんや！
             },
-            timeout: 1000, // タイムアウトを1秒に設定
+            timeout: 2000, // タイムアウトを少し長めに
         });
 
         if (response.data.status !== 'OK' || !response.data.results || response.data.results.length === 0) {
