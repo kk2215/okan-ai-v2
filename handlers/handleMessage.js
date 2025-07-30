@@ -13,7 +13,6 @@ const { createConfirmReminderMessage } = require('../templates/confirmReminderMe
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const chrono = require('chrono-node');
-const dateFnsTz = require('date-fns-tz'); // 正しい時計の呼び出し方
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -37,8 +36,6 @@ async function handleMessage(event, client) {
                 }
                 return await handleReminderInput(userId, messageText, client, event.replyToken, true);
             }
-            
-            // --- 初期設定フロー ---
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -96,13 +93,11 @@ async function handleMessage(event, client) {
             }
         }
 
-        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
         if (proactiveReminderResult) {
             return;
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -115,7 +110,8 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    const referenceDate = dateFnsTz.utcToZonedTime(new Date(), 'Asia/Tokyo');
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const referenceDate = new Date(nowInTokyoStr);
     
     const sentences = text.split(/、|。/g).filter(s => s.trim());
     const remindersToConfirm = [];
@@ -143,7 +139,7 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
                 reminderData.dayOfWeek = date.get('weekday');
                 if (!isGarbageDayMode) {
                     reminderData.notificationTime = date.isCertain('hour')
-                        ? dateFnsTz.formatInTimeZone(parsedDate, 'Asia/Tokyo', 'HH:mm')
+                        ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsedDate)
                         : '08:00';
                 }
             } else {
