@@ -22,13 +22,18 @@ async function handlePostback(event, client) {
             const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
             
             let selectedDays = user.tempData.selectedDays || [];
-            if (!selectedDays.includes(dayOfWeek)) {
+            // 既に選ばれてたら削除、なかったら追加する（トグル機能）
+            if (selectedDays.includes(dayOfWeek)) {
+                selectedDays = selectedDays.filter(d => d !== dayOfWeek);
+            } else {
                 selectedDays.push(dayOfWeek);
             }
             
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
             
-            return client.replyMessage(event.replyToken, { type: 'text', text: `「${dayMap[dayOfWeek]}」を追加したで！` });
+            // 押したことがわかるように、返事だけする
+            // メッセージは更新されへんけど、これで十分やろ
+            return client.replyMessage(event.replyToken, { type: 'text', text: `「${dayMap[dayOfWeek]}」やな！` });
         }
 
         // --- ゴミの日登録（曜日決定） ---
@@ -37,7 +42,7 @@ async function handlePostback(event, client) {
             const selectedDays = user.tempData.selectedDays;
 
             if (!garbageType || !selectedDays || selectedDays.length === 0) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんのゴミか、何曜日か忘れてもうたわ…もう一回、名前から教えてくれるか？' });
+                return client.replyMessage(event.replyToken, { type: 'text', text: '曜日が一つも選ばれてへんで！' });
             }
 
             for (const day of selectedDays) {
@@ -76,29 +81,15 @@ async function handlePostback(event, client) {
 
         // --- リマインダー確認ボタン ---
         if (action === 'confirm_reminder') {
-            const remindersData = user.tempData.remindersData;
-            if (!remindersData || remindersData.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            
-            for (const reminderData of remindersData) {
-                await saveReminder(userId, reminderData);
-            }
-            
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
-            }
+            const reminderData = user.tempData.reminderData;
+            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            await saveReminder(userId, reminderData);
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
         }
         if (action === 'cancel_reminder') {
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。他にはあるか？' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
-            }
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
         }
 
         // --- 初期設定フローのボタン ---
