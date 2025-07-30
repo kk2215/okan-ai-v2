@@ -112,27 +112,21 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    // ★★★ これが最後の作戦や！「日本の時間で考えや！」っておまじないをかける！ ★★★
-    const results = chrono.ja.parse(text, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
-
-    if (results.length === 0) {
-        if (isGarbageDayMode) {
-            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
-            return true;
-        }
-        return false;
-    }
+    // ★★★ これが最後の作戦や！まず、日本の現在時刻を正確に知る！ ★★★
+    const nowInTokyoStr = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const referenceDate = new Date(nowInTokyoStr);
     
     const sentences = text.split(/、|。/g).filter(s => s.trim());
     const remindersToConfirm = [];
 
     for (const sentence of sentences) {
-        const sentenceResults = chrono.ja.parse(sentence, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
-        if (sentenceResults.length === 0) continue;
+        // ★★★ 日本の時間を基準にして、言葉を解釈する！ ★★★
+        const results = chrono.ja.parse(sentence, referenceDate, { forwardDate: true });
+        if (results.length === 0) continue;
 
-        const days = sentenceResults.map(r => r.start);
+        const days = results.map(r => r.start);
         let title = sentence;
-        sentenceResults.forEach(r => {
+        results.forEach(r => {
             title = title.replace(r.text, '');
         });
         title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
