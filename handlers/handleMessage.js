@@ -12,9 +12,8 @@ const { createSetupCompleteMessage } = require('../templates/setupCompleteMessag
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
-const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const chrono = require('chrono-node');
-const dateFnsTz = require('date-fns-tz');
+const dateFnsTz = require('date-fns-tz'); // 正しい時計の呼び出し方
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -30,31 +29,14 @@ async function handleMessage(event, client) {
             if (state === 'AWAITING_REMINDER') {
                 return await handleReminderInput(userId, messageText, client, event.replyToken, false);
             }
-            
-            // --- ゴミの日登録フロー ---
-            if (state === 'AWAITING_GARBAGE_DAY') {
-                if (messageText === 'ゴミの日を設定する') {
-                    await updateUserState(userId, 'AWAITING_GARBAGE_TYPE');
-                    return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！どのゴミの日を登録する？\n「燃えるゴミ」みたいに、まず名前を教えてな。' });
-                } else {
-                    await updateUserState(userId, null);
-                    const finalMessage = createSetupCompleteMessage(user.displayName);
-                    return client.replyMessage(event.replyToken, finalMessage);
-                }
-            }
-            if (state === 'AWAITING_GARBAGE_TYPE') {
+            if (state === 'AWAITING_GARBAGE_DAY_INPUT') {
                 if (['終わり', 'おわり', 'もうない'].includes(messageText)) {
                     await updateUserState(userId, null);
                     const finalMessage = createSetupCompleteMessage(user.displayName);
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ゴミの日の設定、おおきに！' }, finalMessage]);
                 }
-                // 聞いたゴミの名前と、空っぽの曜日リストを一時的に覚えとく
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { garbageType: messageText, selectedDays: [] });
-                const daySelectionMessage = createAskGarbageDayOfWeekMessage(messageText);
-                return client.replyMessage(event.replyToken, daySelectionMessage);
+                return await handleReminderInput(userId, messageText, client, event.replyToken, true);
             }
-            
-            // --- その他の初期設定フロー ---
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -100,15 +82,23 @@ async function handleMessage(event, client) {
                 const selectionMessage = createLineSelectionMessage(allLines);
                 return client.replyMessage(event.replyToken, selectionMessage);
             }
+            if (state === 'AWAITING_GARBAGE_DAY') {
+                if (messageText === 'ゴミの日を設定する') {
+                    await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
+                    return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！収集日を教えてや。\n「毎週火曜は燃えるゴミ」みたいに、一つずつ言うてな。終わったら「終わり」って言うてや。' });
+                } else {
+                    await updateUserState(userId, null);
+                    const finalMessage = createSetupCompleteMessage(user.displayName);
+                    return client.replyMessage(event.replyToken, finalMessage);
+                }
+            }
         }
 
-        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
         if (proactiveReminderResult) {
             return;
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -122,38 +112,55 @@ async function handleMessage(event, client) {
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
     const referenceDate = dateFnsTz.utcToZonedTime(new Date(), 'Asia/Tokyo');
-    const results = chrono.ja.parse(text, referenceDate, { forwardDate: true });
-
-    if (results.length === 0) { return false; }
     
-    const result = results[0];
-    const parsedDate = result.start.date();
-    
-    let title = text.replace(result.text, '').trim();
-    title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
-    title = title.replace(/^(に|で|は|を)/, '').trim();
+    const sentences = text.split(/、|。/g).filter(s => s.trim());
+    const remindersToConfirm = [];
 
-    if (!title) { return false; }
+    for (const sentence of sentences) {
+        const results = chrono.ja.parse(sentence, referenceDate, { forwardDate: true });
+        if (results.length === 0) continue;
 
-    const reminderData = { title: title };
-    const date = result.start;
-    
-    if (date.isCertain('weekday')) {
-        reminderData.type = 'weekly';
-        reminderData.dayOfWeek = date.get('weekday');
-        if (!isGarbageDayMode) {
-            reminderData.notificationTime = date.isCertain('hour')
-                ? dateFnsTz.formatInTimeZone(parsedDate, 'Asia/Tokyo', 'HH:mm')
-                : '08:00';
+        const days = results.map(r => r.start);
+        let title = sentence;
+        results.forEach(r => {
+            title = title.replace(r.text, '');
+        });
+        title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
+        title = title.replace(/^(に|で|は|を)/, '').trim();
+
+        if (!title) continue;
+
+        for (const date of days) {
+            const reminderData = { title: title };
+            const parsedDate = date.date();
+            
+            if (date.isCertain('weekday')) {
+                reminderData.type = 'weekly';
+                reminderData.dayOfWeek = date.get('weekday');
+                if (!isGarbageDayMode) {
+                    reminderData.notificationTime = date.isCertain('hour')
+                        ? dateFnsTz.formatInTimeZone(parsedDate, 'Asia/Tokyo', 'HH:mm')
+                        : '08:00';
+                }
+            } else {
+                reminderData.type = 'once';
+                reminderData.targetDate = parsedDate.toISOString();
+            }
+            remindersToConfirm.push(reminderData);
         }
-    } else {
-        reminderData.type = 'once';
-        reminderData.targetDate = parsedDate.toISOString();
+    }
+
+    if (remindersToConfirm.length === 0) {
+        if (isGarbageDayMode) {
+            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
+            return true;
+        }
+        return false;
     }
     
     const stateKey = isGarbageDayMode ? 'AWAITING_GARBAGE_CONFIRMATION' : 'AWAITING_REMINDER_CONFIRMATION';
-    await updateUserState(userId, stateKey, { reminderData: reminderData });
-    const confirmMessage = createConfirmReminderMessage([reminderData]);
+    await updateUserState(userId, stateKey, { remindersData: remindersToConfirm });
+    const confirmMessage = createConfirmReminderMessage(remindersToConfirm);
     await client.replyMessage(replyToken, confirmMessage);
     return true;
 }
