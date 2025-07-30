@@ -16,6 +16,26 @@ async function handlePostback(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
+        // ★★★ 新しい仕事：ゴミの日の曜日選択ボタン ★★★
+        if (action === 'set_garbage_day') {
+            const dayOfWeek = parseInt(data.get('day'), 10);
+            const garbageType = user.tempData.garbageType;
+
+            if (!garbageType) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんのゴミか忘れてもうたわ…もう一回、名前から教えてくれるか？' });
+            }
+
+            await saveReminder(userId, {
+                title: garbageType,
+                type: 'weekly',
+                dayOfWeek: dayOfWeek,
+            });
+
+            // 続けて他のゴミも登録できるように、またゴミの種類を聞く状態に戻す
+            await updateUserState(userId, 'AWAITING_GARBAGE_TYPE');
+            return client.replyMessage(event.replyToken, { type: 'text', text: `よっしゃ、「${garbageType}」は${['日曜','月曜','火曜','水曜','木曜','金曜','土曜'][dayOfWeek]}やな！\n\n他にはあるか？なかったら「終わり」って言うてな。` });
+        }
+
         // --- リマインダーメニューのボタン処理 ---
         if (action === 'new_reminder') {
             await updateUserState(userId, 'AWAITING_REMINDER');
@@ -37,29 +57,15 @@ async function handlePostback(event, client) {
 
         // --- リマインダー確認ボタン ---
         if (action === 'confirm_reminder') {
-            const remindersData = user.tempData.remindersData;
-            if (!remindersData || remindersData.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            
-            for (const reminderData of remindersData) {
-                await saveReminder(userId, reminderData);
-            }
-            
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
-            }
+            const reminderData = user.tempData.reminderData;
+            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            await saveReminder(userId, reminderData);
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
         }
         if (action === 'cancel_reminder') {
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。他にはあるか？' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
-            }
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
         }
 
         // --- 初期設定フローのボタン ---
