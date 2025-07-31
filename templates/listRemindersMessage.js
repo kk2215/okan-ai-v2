@@ -1,7 +1,5 @@
 // templates/listRemindersMessage.js - 登録済みのリマインダー一覧を作成
 
-const dateFnsTz = require('date-fns-tz'); // 正しい時計の呼び出し方
-
 function createListRemindersMessage(reminders) {
     const dayOfWeekMap = ['日曜', '月曜', '火曜', '水曜', '木曜', '金曜', '土曜'];
 
@@ -14,7 +12,9 @@ function createListRemindersMessage(reminders) {
                 whenText = `毎週${dayOfWeekMap[reminder.dayOfWeek]}の${reminder.notificationTime}頃`;
             }
         } else if (reminder.type === 'once') {
-            whenText = dateFnsTz.formatInTimeZone(reminder.targetDate, 'Asia/Tokyo', 'M月d日(E) HH:mm');
+            const date = new Date(reminder.targetDate);
+            const options = { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false };
+            whenText = new Intl.DateTimeFormat('ja-JP', options).format(date);
         }
 
         return {

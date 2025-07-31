@@ -1,7 +1,7 @@
 // services/reminder.js - リマインダー情報のデータベース操作を担当
 
 const { getDb, FieldValue } = require('./firestore');
-const dateFnsTz = require('date-fns-tz'); // 正しい時計の呼び出し方
+// date-fns-tzはもう使わへん！
 
 const USERS_COLLECTION = 'users';
 const REMINDERS_COLLECTION = 'reminders';
@@ -25,10 +25,10 @@ async function saveReminder(userId, reminderData) {
     };
     
     if (dataToSave.targetDate && typeof dataToSave.targetDate === 'string') {
-        dataToSave.targetDate = dateFnsTz.utcToZonedTime(new Date(dataToSave.targetDate), 'Asia/Tokyo');
+        dataToSave.targetDate = new Date(dataToSave.targetDate);
     }
     if (dataToSave.baseDate && typeof dataToSave.baseDate === 'string') {
-        dataToSave.baseDate = dateFnsTz.utcToZonedTime(new Date(dataToSave.baseDate), 'Asia/Tokyo');
+        dataToSave.baseDate = new Date(dataToSave.baseDate);
     }
 
     await reminderRef.set(dataToSave);

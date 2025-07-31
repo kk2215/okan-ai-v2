@@ -12,8 +12,9 @@ const { createSetupCompleteMessage } = require('../templates/setupCompleteMessag
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
+const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const chrono = require('chrono-node');
-const dateFnsTz = require('date-fns-tz'); // 正しい時計の呼び出し方
+// date-fns-tzはもう使わへん！
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -94,13 +95,11 @@ async function handleMessage(event, client) {
             }
         }
 
-        // --- 通常の会話の中で、リマインダーがないかチェック ---
         const proactiveReminderResult = await handleReminderInput(userId, messageText, client, event.replyToken, false);
         if (proactiveReminderResult) {
             return;
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
 
     } catch (error) {
@@ -113,20 +112,26 @@ async function handleMessage(event, client) {
  * ユーザーの言葉から「いつ」「何を」を読み取って、リマインダーとして処理する関数
  */
 async function handleReminderInput(userId, text, client, replyToken, isGarbageDayMode) {
-    // ★★★ これが最後の作戦や！まず、日本の現在時刻を正確に知る！ ★★★
-    const referenceDate = dateFnsTz.utcToZonedTime(new Date(), 'Asia/Tokyo');
+    const results = chrono.ja.parse(text, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
+
+    if (results.length === 0) {
+        if (isGarbageDayMode) {
+            await client.replyMessage(replyToken, { type: 'text', text: 'すまんな、いつか分からんかったわ…\n「毎週火曜は燃えるゴミ」みたいに教えてくれるか？' });
+            return true;
+        }
+        return false;
+    }
     
     const sentences = text.split(/、|。/g).filter(s => s.trim());
     const remindersToConfirm = [];
 
     for (const sentence of sentences) {
-        // ★★★ 日本の時間を基準にして、言葉を解釈する！ ★★★
-        const results = chrono.ja.parse(sentence, referenceDate, { forwardDate: true });
-        if (results.length === 0) continue;
+        const sentenceResults = chrono.ja.parse(sentence, new Date(), { timezone: 'Asia/Tokyo', forwardDate: true });
+        if (sentenceResults.length === 0) continue;
 
-        const days = results.map(r => r.start);
+        const days = sentenceResults.map(r => r.start);
         let title = sentence;
-        results.forEach(r => {
+        sentenceResults.forEach(r => {
             title = title.replace(r.text, '');
         });
         title = title.replace(/(で?に?、?を?)(リマインド|リマインダー|教えて|アラーム|って|のこと|は)$/, '').trim();
@@ -143,7 +148,7 @@ async function handleReminderInput(userId, text, client, replyToken, isGarbageDa
                 reminderData.dayOfWeek = date.get('weekday');
                 if (!isGarbageDayMode) {
                     reminderData.notificationTime = date.isCertain('hour')
-                        ? dateFnsTz.formatInTimeZone(parsedDate, 'Asia/Tokyo', 'HH:mm')
+                        ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsedDate)
                         : '08:00';
                 }
             } else {
