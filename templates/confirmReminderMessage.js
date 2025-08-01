@@ -40,13 +40,13 @@ function createConfirmReminderMessage(remindersData) {
                 contents: [
                     {
                         type: 'button',
-                        action: { type: 'postback', label: 'それでええで！', data: 'action=confirm_reminder' },
+                        action: { type: 'postback', label: 'それでええで！', data: 'action=confirm_reminder', displayText: 'それでええで！' },
                         style: 'primary',
                         color: '#ff5722'
                     },
                     {
                         type: 'button',
-                        action: { type: 'postback', label: 'やっぱやめる', data: 'action=cancel_reminder' },
+                        action: { type: 'postback', label: 'やっぱやめる', data: 'action=cancel_reminder', displayText: 'やっぱやめる' },
                         style: 'secondary'
                     }
                 ]
