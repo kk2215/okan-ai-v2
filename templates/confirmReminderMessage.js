@@ -1,17 +1,22 @@
 // templates/confirmReminderMessage.js - リマインダー内容の最終確認メッセージを作成
 
-const dateFnsTz = require('date-fns-tz'); // 正しい時計の呼び出し方
-
 function createConfirmReminderMessage(remindersData) {
-    const dayOfWeekMap = ['日曜', '月曜', '火曜', '水曜', '木曜', '金曜', '土曜'];
+    const dayOfWeekJpMap = ['日曜', '月曜', '火曜', '水曜', '木曜', '金曜', '土曜'];
     
     const summary = remindersData.map(r => {
         let whenText = '';
         if (r.type === 'weekly') {
             const time = r.notificationTime ? `の${r.notificationTime}頃` : 'の朝';
-            whenText = `毎週${dayOfWeekMap[r.dayOfWeek]}${time}`;
+            whenText = `毎週${dayOfWeekJpMap[r.dayOfWeek]}${time}`;
         } else if (r.type === 'once') {
-            whenText = dateFnsTz.formatInTimeZone(new Date(r.targetDate), 'Asia/Tokyo', 'M月d日(E) HH:mm');
+            const date = new Date(r.targetDate);
+            const options = { 
+                timeZone: 'Asia/Tokyo', 
+                year: 'numeric', month: 'numeric', day: 'numeric', 
+                weekday: 'short',
+                hour: '2-digit', minute: '2-digit', hour12: false 
+            };
+            whenText = new Intl.DateTimeFormat('ja-JP', options).format(date);
         }
         return `・${r.title} (${whenText})`;
     }).join('\n');
