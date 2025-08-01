@@ -78,29 +78,15 @@ async function handlePostback(event, client) {
 
         // --- リマインダー確認ボタン ---
         if (action === 'confirm_reminder') {
-            const remindersData = user.tempData.remindersData;
-            if (!remindersData || remindersData.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            
-            for (const reminderData of remindersData) {
-                await saveReminder(userId, reminderData);
-            }
-            
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
-            }
+            const reminderData = user.tempData.reminderData;
+            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            await saveReminder(userId, reminderData);
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
         }
         if (action === 'cancel_reminder') {
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。他にはあるか？' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
-            }
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
         }
 
         // --- 初期設定フローのボタン ---
