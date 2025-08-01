@@ -12,7 +12,6 @@ const { createSetupCompleteMessage } = require('../templates/setupCompleteMessag
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
-const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage'); // 新しい設計図
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -29,11 +28,11 @@ async function handleMessage(event, client) {
             // --- 新しいリマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
-                const dateTimeMessage = createAskReminderDateTimeMessage();
-                return client.replyMessage(event.replyToken, [
-                    { type: 'text', text: `「${messageText}」やね。ほな、それはいつや？` },
-                    dateTimeMessage
-                ]);
+                return client.replyMessage(event.replyToken, { type: 'text', text: `「${messageText}」やね。ほな、それはいつや？` });
+            }
+            if (state === 'AWAITING_REMINDER_DATETIME') {
+                // ここは、まだポンコツなままやから、一旦何もしないでおく
+                return client.replyMessage(event.replyToken, { type: 'text', text: '時間の設定は、今お勉強中やねん。ごめんな！' });
             }
 
             // --- ゴミの日登録フロー ---

@@ -6,8 +6,6 @@ const { createAskNotificationTimeMessage } = require('../templates/askNotificati
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createTrainLineConfirmationMessage } = require('../templates/trainLineConfirmationMessage');
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
-const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
-const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -18,57 +16,24 @@ async function handlePostback(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- 新しいリマインダー登録フロー ---
-        if (action === 'new_reminder') {
-            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
-        }
-        if (action === 'set_reminder_datetime') {
-            const datetime = event.postback.params.datetime; // YYYY-MM-DDThh:mm の形式で来る
-            const title = user.tempData.reminderTitle;
-            
-            const reminderData = {
-                title: title,
-                type: 'once', // とりあえず一回だけにしとく
-                targetDate: new Date(datetime).toISOString(),
-            };
-
-            await updateUserState(userId, 'AWAITING_REMINDER_REPEAT', { reminderData: reminderData });
-            const repeatMessage = createAskReminderRepeatMessage();
-            return client.replyMessage(event.replyToken, repeatMessage);
-        }
-        if (action === 'set_reminder_repeat') {
-            const repeatType = data.get('type');
-            let reminderData = user.tempData.reminderData;
-
-            if (repeatType === 'weekly') {
-                reminderData.type = 'weekly';
-                const date = new Date(reminderData.targetDate);
-                reminderData.dayOfWeek = date.getDay();
-                reminderData.notificationTime = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
-            }
-            // 'once'の場合は、そのままでええ
-
-            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData: reminderData });
-            const confirmMessage = createConfirmReminderMessage([reminderData]);
-            return client.replyMessage(event.replyToken, confirmMessage);
-        }
-
         // --- ゴミの日登録（曜日選択） ---
         if (action === 'set_garbage_day') {
             const dayOfWeek = parseInt(data.get('day'), 10);
             const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
             
             let selectedDays = user.tempData.selectedDays || [];
+            let replyText;
+
             if (selectedDays.includes(dayOfWeek)) {
                 selectedDays = selectedDays.filter(d => d !== dayOfWeek);
+                replyText = `「${dayMap[dayOfWeek]}」を取り消したで！`;
             } else {
                 selectedDays.push(dayOfWeek);
+                replyText = `「${dayMap[dayOfWeek]}」を追加したで！`;
             }
             
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
-            
-            return;
+            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
         }
 
         // --- ゴミの日登録（曜日決定） ---
@@ -96,6 +61,10 @@ async function handlePostback(event, client) {
         }
 
         // --- リマインダーメニューのボタン処理 ---
+        if (action === 'new_reminder') {
+            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
+        }
         if (action === 'list_reminders') {
             const reminders = await getReminders(userId);
             if (reminders.length === 0) {
@@ -112,20 +81,11 @@ async function handlePostback(event, client) {
 
         // --- リマインダー確認ボタン ---
         if (action === 'confirm_reminder') {
-            const remindersData = user.tempData.remindersData;
-            if (!remindersData || remindersData.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            
-            for (const reminderData of remindersData) {
-                await saveReminder(userId, reminderData);
-            }
-            
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
-            }
+            const reminderData = user.tempData.reminderData;
+            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            await saveReminder(userId, reminderData);
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
         }
         if (action === 'cancel_reminder') {
             await updateUserState(userId, null);
