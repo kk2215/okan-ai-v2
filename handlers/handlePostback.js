@@ -19,19 +19,24 @@ async function handlePostback(event, client) {
         // --- ゴミの日登録（曜日選択） ---
         if (action === 'set_garbage_day') {
             const dayOfWeek = parseInt(data.get('day'), 10);
+            const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
             
             let selectedDays = user.tempData.selectedDays || [];
+            let replyText;
+
+            // 既に選ばれてたら削除、なかったら追加する（トグル機能）
             if (selectedDays.includes(dayOfWeek)) {
                 selectedDays = selectedDays.filter(d => d !== dayOfWeek);
+                replyText = `「${dayMap[dayOfWeek]}」を取り消したで！`;
             } else {
                 selectedDays.push(dayOfWeek);
+                replyText = `「${dayMap[dayOfWeek]}」を追加したで！`;
             }
             
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
             
             // 押したことがわかるように、返事だけする
-            // メッセージは更新されへんけど、これで十分やろ
-            return; // ここでは返事をせんと、ユーザーが「決定」を押すのを待つ
+            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
         }
 
         // --- ゴミの日登録（曜日決定） ---
@@ -60,8 +65,8 @@ async function handlePostback(event, client) {
 
         // --- リマインダーメニューのボタン処理 ---
         if (action === 'new_reminder') {
-            await updateUserState(userId, 'AWAITING_REMINDER');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何をいつ教えたらええ？\n「明日の15時に会議」みたいに教えてな。' });
+            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
         }
         if (action === 'list_reminders') {
             const reminders = await getReminders(userId);
@@ -79,29 +84,15 @@ async function handlePostback(event, client) {
 
         // --- リマインダー確認ボタン ---
         if (action === 'confirm_reminder') {
-            const remindersData = user.tempData.remindersData;
-            if (!remindersData || remindersData.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
-            
-            for (const reminderData of remindersData) {
-                await saveReminder(userId, reminderData);
-            }
-            
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！他にはあるか？なかったら「終わり」って言うてな。' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
-            }
+            const reminderData = user.tempData.reminderData;
+            if (!reminderData) { return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、なんの確認やったか忘れてもうたわ…' }); }
+            await saveReminder(userId, reminderData);
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'よっしゃ、覚えといたで！時間になったら教えるな！' });
         }
         if (action === 'cancel_reminder') {
-            if (user.state === 'AWAITING_GARBAGE_CONFIRMATION') {
-                await updateUserState(userId, 'AWAITING_GARBAGE_DAY_INPUT');
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。他にはあるか？' });
-            } else {
-                await updateUserState(userId, null);
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
-            }
+            await updateUserState(userId, null);
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
         }
 
         // --- 初期設定フローのボタン ---
@@ -136,9 +127,18 @@ async function handlePostback(event, client) {
         if (action === 'add_line') {
             const lineToAdd = data.get('line');
             let selectedLines = user.tempData.selectedLines || [];
-            if (!selectedLines.includes(lineToAdd)) { selectedLines.push(lineToAdd); }
+            let replyText;
+            
+            if (selectedLines.includes(lineToAdd)) {
+                selectedLines = selectedLines.filter(l => l !== lineToAdd);
+                replyText = `「${lineToAdd}」を取り消したで！`;
+            } else {
+                selectedLines.push(lineToAdd);
+                replyText = `「${lineToAdd}」を追加したで！`;
+            }
+            
             await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, selectedLines: selectedLines });
-            return client.replyMessage(event.replyToken, { type: 'text', text: `「${lineToAdd}」を追加したで！` });
+            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
         }
         if (action === 'confirm_line_selection') {
             const selectedLines = user.tempData.selectedLines || [];
