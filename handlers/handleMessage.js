@@ -1,19 +1,8 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
-const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
-const { getLinesByStationName } = require('../services/heartrails');
-const { saveReminder } = require('../services/reminder');
-const { searchLocations } = require('../services/geocoding');
+const { getUser, updateUserState } = require('../services/user');
 const { detectIntent } = require('../services/dialogflow'); // ★★★ 新しい頭脳を呼ぶ！ ★★★
-const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
-const { createAskStationsMessage } = require('../templates/askStationsMessage');
-const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
-const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
-const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
-const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
-const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
-const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -23,24 +12,20 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- ステート（状態）に応じた会話の処理 ---
-        if (user.state) {
-            // (初期設定のコードは変更ないので省略)
-        }
-
-        // --- 通常の会話は、まずDialogflowはんに相談 ---
+        // --- 会話は、まずDialogflowはんに丸投げ ---
         const intentResult = await detectIntent(userId, messageText);
 
+        // ★★★ Dialogflowはんが「リマインダーの登録や！」と判断した場合 ★★★
         if (intentResult && intentResult.intent === 'SetReminder') {
             const params = intentResult.parameters;
-            const date = params.date_time || params.date;
+            const dateTime = params.date_time || params.date;
             const title = params.any;
 
-            if (date && title) {
+            if (dateTime && title) {
                 const reminderData = {
                     title: title,
                     type: 'once', // 今は一回だけにしとく
-                    targetDate: new Date(date).toISOString(),
+                    targetDate: new Date(dateTime).toISOString(),
                 };
                 await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData: reminderData });
                 const confirmMessage = createConfirmReminderMessage([reminderData]);
@@ -49,7 +34,8 @@ async function handleMessage(event, client) {
         }
 
         // --- Dialogflowはんがわからんかった時の、いつもの返事 ---
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？なんか用事やったらメニューから選んでな👵' });
+        // (ここには、初期設定の会話とか、他の機能の会話が将来入ってくる)
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？' });
 
     } catch (error) {
         console.error('メッセージの処理でエラーが出てもうたわ:', error);
