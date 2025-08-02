@@ -103,15 +103,15 @@ async function handleMessage(event, client) {
                 }
                 const [from, to] = stations;
 
-                const fromLocations = await searchLocations(from);
-                const toLocations = await searchLocations(to);
+                // ★★★ これがほんまの最後の修正や！ ★★★
+                // ちゃんと「駅」を付けて、地名のプロに住所を聞く！
+                const fromLocations = await searchLocations(from + '駅');
+                const toLocations = await searchLocations(to + '駅');
 
                 if (!fromLocations || fromLocations.length === 0 || !toLocations || toLocations.length === 0) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
                 }
 
-                // ★★★ これがほんまの最後の修正や！ ★★★
-                // ちゃんと「緯度(lat)」と「経度(lng)」で、正しい住所を受け取る！
                 const fromCoords = { lat: fromLocations[0].lat, lng: fromLocations[0].lng };
                 const toCoords = { lat: toLocations[0].lat, lng: toLocations[0].lng };
                 
