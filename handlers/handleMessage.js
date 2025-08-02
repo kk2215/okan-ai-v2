@@ -1,7 +1,7 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
-const { getLinesFromRoute } = require('../services/directions'); // 新しいナビはんを呼ぶ！
+const { getLinesFromRoute } = require('../services/directions');
 const { searchLocations } = require('../services/geocoding');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
@@ -102,9 +102,25 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「板橋から六本木」みたいにもう一回教えてくれるか？' });
                 }
                 const [from, to] = stations;
-                const allLines = await getLinesFromRoute(from, to);
+
+                // ★★★ ここからが、ほんまの最後の修正や！ ★★★
+                // 1. まず、地名のプロに、それぞれの場所の住所（緯度経度）を聞く
+                const fromLocations = await searchLocations(from);
+                const toLocations = await searchLocations(to);
+
+                if (!fromLocations || fromLocations.length === 0 || !toLocations || toLocations.length === 0) {
+                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
+                }
+
+                // 2. 一番それっぽい住所（最初の候補）を使う
+                const fromCoords = fromLocations[0].geometry.location;
+                const toCoords = toLocations[0].geometry.location;
+                
+                // 3. その住所を元に、プロのナビはんに道案内を頼む
+                const allLines = await getLinesFromRoute(fromCoords, toCoords);
+
                 if (!allLines || allLines.length === 0) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの行き方が見つからんかったわ…駅の名前、間違えてへんか？` });
+                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの公共交通機関での行き方が見つからんかったわ…` });
                 }
                 await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
                 const selectionMessage = createLineSelectionMessage(allLines);

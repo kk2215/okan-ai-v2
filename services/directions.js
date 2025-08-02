@@ -12,12 +12,12 @@ if (process.env.GOOGLE_MAPS_API_KEY) {
 }
 
 /**
- * 出発地と目的地から、経由する全ての路線名を取得する
- * @param {string} from - 出発地
- * @param {string} to - 目的地
+ * 出発地と目的地の緯度経度から、経由する全ての路線名を取得する
+ * @param {object} originCoords - { lat, lng }
+ * @param {object} destinationCoords - { lat, lng }
  * @returns {Promise<string[]|null>} 路線名の配列
  */
-async function getLinesFromRoute(from, to) {
+async function getLinesFromRoute(originCoords, destinationCoords) {
     if (!mapsClient) {
         return null;
     }
@@ -25,8 +25,9 @@ async function getLinesFromRoute(from, to) {
     try {
         const response = await mapsClient.directions({
             params: {
-                origin: from,
-                destination: to,
+                // ★★★ これが最後の作戦や！曖昧な地名やのうて、緯度経度で聞く！ ★★★
+                origin: originCoords,
+                destination: destinationCoords,
                 mode: 'transit',
                 language: 'ja',
                 region: 'jp',
@@ -36,7 +37,7 @@ async function getLinesFromRoute(from, to) {
         });
 
         if (response.data.status !== 'OK' || !response.data.routes || response.data.routes.length === 0) {
-            console.warn(`Directions APIで経路が見つからんかったわ: ${from} -> ${to}`, response.data.status);
+            console.warn(`Directions APIで経路が見つからんかったわ`, response.data.status);
             return [];
         }
 
@@ -54,7 +55,7 @@ async function getLinesFromRoute(from, to) {
         return Array.from(allLines);
 
     } catch (error) {
-        console.error(`Directions APIでエラーが発生: ${from} -> ${to}`, error.response ? error.response.data : error.message);
+        console.error(`Directions APIでエラーが発生`, error.response ? error.response.data : error.message);
         return null;
     }
 }
