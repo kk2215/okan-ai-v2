@@ -41,6 +41,7 @@ async function handleMessage(event, client) {
                     dateTimeMessage
                 ]);
             }
+            // 日時選択ボタンが押されるのを待ってる時は、文字で返事されても困るから、優しく促す
             if (state === 'AWAITING_REMINDER_DATETIME') {
                 return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、下の「日時をえらぶ」ボタンで教えてくれるか？' });
             }
@@ -115,7 +116,7 @@ async function handleMessage(event, client) {
             }
         }
 
-        // --- どの機能にも当てはまらんかった時の、いつもの返事 ---
+        // --- どの機能にも当てはまらんかった時の、賢い返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？予定を教えたい時は「リマインダー」って言うてみてな👵' });
 
     } catch (error) {
