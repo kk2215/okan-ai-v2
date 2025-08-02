@@ -28,12 +28,16 @@ async function searchLocations(address) {
             },
             timeout: 2000,
         });
-        if (response.data.status !== 'OK') return [];
+        if (response.data.status !== 'OK' || !response.data.results || response.data.results.length === 0) {
+            return [];
+        }
         return response.data.results
             .map(result => {
                 if (!result.address_components || result.address_components.length === 0) return null;
                 return {
                     placeId: result.place_id,
+                    lat: result.geometry.location.lat,
+                    lng: result.geometry.location.lng,
                     locationForWeather: `${result.address_components[0].long_name},JP`,
                     formattedAddress: result.formatted_address,
                 };

@@ -2,7 +2,7 @@
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { getLinesFromRoute } = require('../services/directions');
-const { searchLocations, findPlaceIdForStation } = require('../services/geocoding');
+const { searchLocations, findPlaceIdForStation } = require('../services/geocoding'); // findPlaceIdForStationも呼ぶ
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
@@ -99,6 +99,7 @@ async function handleMessage(event, client) {
             if (state === 'AWAITING_STATIONS') {
                 const stations = messageText.split(/から|まで/g).map(s => s.trim()).filter(Boolean);
                 if (stations.length < 2) {
+                    // ★★★ ここがアホなバグの犯人や！きっちり直しといたで！ ★★★
                     return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「板橋から六本木」みたいにもう一回教えてくれるか？' });
                 }
                 const [from, to] = stations;
