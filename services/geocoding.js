@@ -28,9 +28,7 @@ async function searchLocations(address) {
             },
             timeout: 2000,
         });
-        if (response.data.status !== 'OK' || !response.data.results || response.data.results.length === 0) {
-            return [];
-        }
+        if (response.data.status !== 'OK') return [];
         return response.data.results
             .map(result => {
                 if (!result.address_components || result.address_components.length === 0) return null;
