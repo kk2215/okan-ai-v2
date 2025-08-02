@@ -1,4 +1,4 @@
-// services/geocoding.js - Google Geocoding APIと通信する専門家
+// services/geocoding.js - Google Geocoding & Places APIと通信する専門家
 
 const { Client } = require("@googlemaps/google-maps-services-js");
 
@@ -6,9 +6,9 @@ let mapsClient;
 
 if (process.env.GOOGLE_MAPS_API_KEY) {
     mapsClient = new Client({});
-    console.log('地名のプロ（Googleはん）、厨房にお迎えしたで！');
+    console.log('Googleの地図のプロはん、厨房にお迎えしたで！');
 } else {
-    console.error('地名のプロを呼んでくるのに失敗したわ… GOOGLE_MAPS_API_KEYの設定、もう一回確認してくれるか？');
+    console.error('地図のプロはんを呼んでくるのに失敗したわ… GOOGLE_MAPS_API_KEYの設定、もう一回確認してくれるか？');
 }
 
 /**
@@ -17,10 +17,7 @@ if (process.env.GOOGLE_MAPS_API_KEY) {
  * @returns {Promise<Array|null>} 場所の候補オブジェクトの配列
  */
 async function searchLocations(address) {
-    if (!mapsClient) {
-        return null;
-    }
-
+    if (!mapsClient) return null;
     try {
         const response = await mapsClient.geocode({
             params: {
@@ -31,32 +28,51 @@ async function searchLocations(address) {
             },
             timeout: 2000,
         });
-
-        if (response.data.status !== 'OK' || !response.data.results || response.data.results.length === 0) {
-            console.warn(`Geocoding APIで場所が見つからんかったわ: ${address}`, response.data.status);
-            return [];
-        }
-
+        if (response.data.status !== 'OK') return [];
         return response.data.results
             .map(result => {
-                if (!result.address_components || result.address_components.length === 0) {
-                    return null;
-                }
+                if (!result.address_components || result.address_components.length === 0) return null;
                 return {
-                    // ★★★ これが駅の番地（プレイスID）や！ ★★★
                     placeId: result.place_id,
                     locationForWeather: `${result.address_components[0].long_name},JP`,
                     formattedAddress: result.formatted_address,
                 };
             })
             .filter(Boolean);
-
     } catch (error) {
-        console.error(`Geocoding APIでエラーが発生: ${address}`, error.response ? error.response.data : error.message);
+        console.error(`Geocoding APIでエラーが発生: ${address}`, error.message);
+        return null;
+    }
+}
+
+/**
+ * 駅名から、駅の番地（プレイスID）を取得する
+ * @param {string} stationName - ユーザーが入力した駅名
+ * @returns {Promise<string|null>}
+ */
+async function findPlaceIdForStation(stationName) {
+    if (!mapsClient) return null;
+    try {
+        const response = await mapsClient.findPlaceFromText({
+            params: {
+                input: stationName,
+                inputtype: 'textquery',
+                fields: ['place_id'],
+                language: 'ja',
+                key: process.env.GOOGLE_MAPS_API_KEY,
+            },
+        });
+        if (response.data.status !== 'OK' || response.data.candidates.length === 0) {
+            return null;
+        }
+        return response.data.candidates[0].place_id;
+    } catch (error) {
+        console.error(`Places APIでエラーが発生: ${stationName}`, error.message);
         return null;
     }
 }
 
 module.exports = {
     searchLocations,
+    findPlaceIdForStation,
 };

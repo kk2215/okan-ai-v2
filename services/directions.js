@@ -18,9 +18,7 @@ if (process.env.GOOGLE_MAPS_API_KEY) {
  * @returns {Promise<string[]|null>} 路線名の配列
  */
 async function getLinesFromRoute(originPlaceId, destinationPlaceId) {
-    if (!mapsClient) {
-        return null;
-    }
+    if (!mapsClient) return null;
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -30,7 +28,6 @@ async function getLinesFromRoute(originPlaceId, destinationPlaceId) {
     try {
         const response = await mapsClient.directions({
             params: {
-                // ★★★ これがほんまの最終奥義や！駅の番地（プレイスID）で聞く！ ★★★
                 origin: `place_id:${originPlaceId}`,
                 destination: `place_id:${destinationPlaceId}`,
                 mode: 'transit',
@@ -61,7 +58,7 @@ async function getLinesFromRoute(originPlaceId, destinationPlaceId) {
         return Array.from(allLines);
 
     } catch (error) {
-        console.error(`Directions APIでエラーが発生`, error.response ? error.response.data : error.message);
+        console.error(`Directions APIでエラーが発生`, error.message);
         return null;
     }
 }
