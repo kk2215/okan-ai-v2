@@ -74,7 +74,7 @@ async function handleMessage(event, client) {
                 }
                 if (locations.length === 1) {
                     const location = locations[0];
-                    await updateUserLocation(userId, { location: location.locationForWeather, lat: location.lat, lng: location.lng });
+                    await updateUserLocation(userId, { location: location.locationForWeather, placeId: location.placeId });
                     await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
                     const replyText = `「${location.formattedAddress}」やね、覚えたで！`;
                     const nextMessage = createAskNotificationTimeMessage();
@@ -103,8 +103,6 @@ async function handleMessage(event, client) {
                 }
                 const [from, to] = stations;
 
-                // ★★★ これがほんまの最後の修正や！ ★★★
-                // ちゃんと「駅」を付けて、地名のプロに住所を聞く！
                 const fromLocations = await searchLocations(from + '駅');
                 const toLocations = await searchLocations(to + '駅');
 
@@ -112,10 +110,10 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
                 }
 
-                const fromCoords = { lat: fromLocations[0].lat, lng: fromLocations[0].lng };
-                const toCoords = { lat: toLocations[0].lat, lng: toLocations[0].lng };
+                const fromPlaceId = fromLocations[0].placeId;
+                const toPlaceId = toLocations[0].placeId;
                 
-                const allLines = await getLinesFromRoute(fromCoords, toCoords);
+                const allLines = await getLinesFromRoute(fromPlaceId, toPlaceId);
 
                 if (!allLines || allLines.length === 0) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの公共交通機関での行き方が見つからんかったわ…` });
