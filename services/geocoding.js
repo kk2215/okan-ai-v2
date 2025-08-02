@@ -18,7 +18,6 @@ if (process.env.GOOGLE_MAPS_API_KEY) {
  */
 async function searchLocations(address) {
     if (!mapsClient) {
-        console.error('Maps Clientが準備できてへんから、場所は探されへんわ。');
         return null;
     }
 
@@ -38,21 +37,19 @@ async function searchLocations(address) {
             return [];
         }
 
-        // ★★★ ここからが、ほんまの最後の修正や！ ★★★
         return response.data.results
             .map(result => {
-                // ちゃんと地名が取れるか、きっちり確認する
                 if (!result.address_components || result.address_components.length === 0) {
-                    return null; // おかしなデータは無視する
+                    return null;
                 }
                 return {
-                    lat: result.geometry.location.lat,
-                    lng: result.geometry.location.lng,
+                    // ★★★ これが駅の番地（プレイスID）や！ ★★★
+                    placeId: result.place_id,
                     locationForWeather: `${result.address_components[0].long_name},JP`,
                     formattedAddress: result.formatted_address,
                 };
             })
-            .filter(Boolean); // nullになったやつは、リストから消しとく
+            .filter(Boolean);
 
     } catch (error) {
         console.error(`Geocoding APIでエラーが発生: ${address}`, error.response ? error.response.data : error.message);
