@@ -2,7 +2,6 @@
 
 const { Client } = require("@googlemaps/google-maps-services-js");
 
-// ★★★ これがほんまの最後の作戦や！ちゃんと専用のAPIキーで挨拶する！ ★★★
 let mapsClient;
 
 if (process.env.GOOGLE_MAPS_API_KEY) {
@@ -29,9 +28,9 @@ async function searchLocations(address) {
                 address: address,
                 language: 'ja',
                 region: 'jp',
-                key: process.env.GOOGLE_MAPS_API_KEY // ★★★ ここで、ちゃんと専用のAPIキーを使うんや！
+                key: process.env.GOOGLE_MAPS_API_KEY
             },
-            timeout: 2000, // タイムアウトを少し長めに
+            timeout: 2000,
         });
 
         if (response.data.status !== 'OK' || !response.data.results || response.data.results.length === 0) {
@@ -40,6 +39,9 @@ async function searchLocations(address) {
         }
 
         return response.data.results.map(result => ({
+            // ★★★ 緯度と経度も一緒に返すようにしたで！ ★★★
+            lat: result.geometry.location.lat,
+            lng: result.geometry.location.lng,
             locationForWeather: `${result.address_components[0].long_name},JP`,
             formattedAddress: result.formatted_address,
         }));

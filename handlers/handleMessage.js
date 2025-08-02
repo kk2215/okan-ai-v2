@@ -75,7 +75,12 @@ async function handleMessage(event, client) {
                 }
                 if (locations.length === 1) {
                     const location = locations[0];
-                    await updateUserLocation(userId, location.locationForWeather);
+                    // ★★★ 緯度経度もちゃんと保存するで！ ★★★
+                    await updateUserLocation(userId, { 
+                        location: location.locationForWeather, 
+                        lat: location.lat, 
+                        lng: location.lng 
+                    });
                     await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
                     const replyText = `「${location.formattedAddress}」やね、覚えたで！`;
                     const nextMessage = createAskNotificationTimeMessage();

@@ -16,8 +16,11 @@ async function saveUser(userData) {
         displayName: userData.displayName,
         notificationTime: '07:00',
         location: null,
+        // ★★★ 緯度と経度を記録する場所を作ったで！ ★★★
+        lat: null,
+        lng: null,
         trainLines: [],
-        state: null, // ★★★ ここを、最初は必ずnullで作成するようにする ★★★
+        state: null,
         tempData: {},
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -62,18 +65,20 @@ async function updateUserState(userId, state, tempData = null) {
 }
 
 /**
- * ユーザーの地域情報を更新する
+ * ユーザーの地域情報（緯度経度も）を更新する
  * @param {string} userId - LINEのユーザーID
- * @param {string|null} location - 新しい地域情報
+ * @param {object} locationData - { location, lat, lng } を含む地域情報
  */
-async function updateUserLocation(userId, location) {
+async function updateUserLocation(userId, locationData) {
     const db = getDb();
     const userRef = db.collection(USERS_COLLECTION).doc(userId);
     await userRef.update({
-        location: location,
+        location: locationData.location,
+        lat: locationData.lat,
+        lng: locationData.lng,
         updatedAt: FieldValue.serverTimestamp(),
     });
-    console.log(`ユーザーの地域を更新しました: ${userId} -> ${location}`);
+    console.log(`ユーザーの地域を更新しました: ${userId} -> ${locationData.location}`);
 }
 
 /**
