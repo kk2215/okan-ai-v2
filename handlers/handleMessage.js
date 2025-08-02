@@ -103,8 +103,6 @@ async function handleMessage(event, client) {
                 }
                 const [from, to] = stations;
 
-                // ★★★ ここからが、ほんまの最後の修正や！ ★★★
-                // 1. まず、地名のプロに、それぞれの場所の住所（緯度経度）を聞く
                 const fromLocations = await searchLocations(from);
                 const toLocations = await searchLocations(to);
 
@@ -112,11 +110,11 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
                 }
 
-                // 2. 一番それっぽい住所（最初の候補）を使う
-                const fromCoords = fromLocations[0].geometry.location;
-                const toCoords = toLocations[0].geometry.location;
+                // ★★★ これがほんまの最後の修正や！ ★★★
+                // ちゃんと「緯度(lat)」と「経度(lng)」で、正しい住所を受け取る！
+                const fromCoords = { lat: fromLocations[0].lat, lng: fromLocations[0].lng };
+                const toCoords = { lat: toLocations[0].lat, lng: toLocations[0].lng };
                 
-                // 3. その住所を元に、プロのナビはんに道案内を頼む
                 const allLines = await getLinesFromRoute(fromCoords, toCoords);
 
                 if (!allLines || allLines.length === 0) {
