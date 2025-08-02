@@ -1,6 +1,7 @@
 // services/directions.js - Google Directions APIと通信する専門家
 
 const { Client } = require("@googlemaps/google-maps-services-js");
+const { utcToZonedTime } = require('date-fns-tz'); // 正しい時計の専門家を呼んでくるで！
 
 let mapsClient;
 
@@ -20,7 +21,11 @@ if (process.env.GOOGLE_MAPS_API_KEY) {
 async function getLinesFromRoute(originPlaceId, destinationPlaceId) {
     if (!mapsClient) return null;
 
-    const tomorrow = new Date();
+    // ★★★ これがほんまの最終奥義や！ ★★★
+    // まず、日本の現在時刻を正確に知る
+    const nowInTokyo = utcToZonedTime(new Date(), 'Asia/Tokyo');
+    // その日本の日付を基準に、次の日の朝8時に設定する
+    const tomorrow = new Date(nowInTokyo);
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(8, 0, 0, 0);
     const departureTime = Math.floor(tomorrow.getTime() / 1000);

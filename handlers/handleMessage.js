@@ -2,7 +2,7 @@
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { getLinesFromRoute } = require('../services/directions');
-const { searchLocations, findPlaceIdForStation } = require('../services/geocoding'); // findPlaceIdForStationも呼ぶ
+const { searchLocations, findPlaceIdForStation } = require('../services/geocoding');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
@@ -103,8 +103,6 @@ async function handleMessage(event, client) {
                 }
                 const [from, to] = stations;
 
-                // ★★★ これがほんまの最後の修正や！ ★★★
-                // 1. まず、駅探しのプロに、それぞれの駅の番地（プレイスID）を聞く
                 const fromPlaceId = await findPlaceIdForStation(from + '駅');
                 const toPlaceId = await findPlaceIdForStation(to + '駅');
 
@@ -112,7 +110,6 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
                 }
                 
-                // 2. その番地を元に、プロのナビはんに道案内を頼む
                 const allLines = await getLinesFromRoute(fromPlaceId, toPlaceId);
 
                 if (!allLines || allLines.length === 0) {
