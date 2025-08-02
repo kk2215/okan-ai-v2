@@ -2,6 +2,7 @@
 
 function createAskReminderRepeatMessage() {
     return {
+        type: 'text', // ★★★ 犯人はこいつや！この一行が抜けとった！ ★★★
         text: 'この予定、一回だけのことか？それとも毎週繰り返すんか？',
         quickReply: {
             items: [
