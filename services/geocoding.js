@@ -38,13 +38,21 @@ async function searchLocations(address) {
             return [];
         }
 
-        return response.data.results.map(result => ({
-            // ★★★ 緯度と経度も一緒に返すようにしたで！ ★★★
-            lat: result.geometry.location.lat,
-            lng: result.geometry.location.lng,
-            locationForWeather: `${result.address_components[0].long_name},JP`,
-            formattedAddress: result.formatted_address,
-        }));
+        // ★★★ ここからが、ほんまの最後の修正や！ ★★★
+        return response.data.results
+            .map(result => {
+                // ちゃんと地名が取れるか、きっちり確認する
+                if (!result.address_components || result.address_components.length === 0) {
+                    return null; // おかしなデータは無視する
+                }
+                return {
+                    lat: result.geometry.location.lat,
+                    lng: result.geometry.location.lng,
+                    locationForWeather: `${result.address_components[0].long_name},JP`,
+                    formattedAddress: result.formatted_address,
+                };
+            })
+            .filter(Boolean); // nullになったやつは、リストから消しとく
 
     } catch (error) {
         console.error(`Geocoding APIでエラーが発生: ${address}`, error.response ? error.response.data : error.message);
