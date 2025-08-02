@@ -18,11 +18,14 @@ initializeScheduler();
 
 const app = express();
 
-// ★★★ これが新しい、見張り番専用の呼び鈴や！ ★★★
-// /healthっていう住所に誰かが来たら、「元気やで！」(200 OK)ってすぐに返事する
+// ★★★ これがほんまの最後の修正や！見張り番専用の呼び鈴を、ここに付け直す！ ★★★
 app.get('/health', (req, res) => {
-    res.status(200).send('OK');
-    console.log('見張り番から生存確認が来たで！元気やで！');
+    try {
+        res.status(200).send('OK');
+        console.log('見張り番から生存確認が来たで！元気やで！');
+    } catch (error) {
+        res.status(500).send('Error');
+    }
 });
 
 
