@@ -59,15 +59,18 @@ async function handlePostback(event, client) {
             const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
             
             let selectedDays = user.tempData.selectedDays || [];
+            let replyText;
+
             if (selectedDays.includes(dayOfWeek)) {
                 selectedDays = selectedDays.filter(d => d !== dayOfWeek);
+                replyText = `「${dayMap[dayOfWeek]}」を取り消したで！`;
             } else {
                 selectedDays.push(dayOfWeek);
+                replyText = `「${dayMap[dayOfWeek]}」を追加したで！`;
             }
             
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
-            
-            return;
+            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
         }
 
         // --- ゴミの日登録（曜日決定） ---
@@ -134,7 +137,15 @@ async function handlePostback(event, client) {
                 return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、どの場所を選んだか、わからんようになってしもたわ…' });
             }
             const selectedLocation = locations[locationIndex];
-            await updateUserLocation(userId, selectedLocation.locationForWeather);
+            
+            // ★★★ これがほんまの最後の修正や！ ★★★
+            // 名前と緯度経度を、ちゃんとセットで渡したる！
+            await updateUserLocation(userId, { 
+                location: selectedLocation.locationForWeather, 
+                lat: selectedLocation.lat, 
+                lng: selectedLocation.lng 
+            });
+
             await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
             const replyText = `「${selectedLocation.formattedAddress}」やね、承知したで！`;
             const nextMessage = createAskNotificationTimeMessage();
