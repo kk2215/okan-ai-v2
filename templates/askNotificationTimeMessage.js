@@ -20,7 +20,7 @@ function createAskNotificationTimeMessage() {
                     },
                     {
                         type: 'text',
-                        text: '下のボタンで選ぶか、「8:30」みたいに入力してくれてもええで。',
+                        text: '下のボタンで、好きな時間を選んでな。',
                         wrap: true,
                         size: 'md',
                         margin: 'md',
@@ -39,9 +39,8 @@ function createAskNotificationTimeMessage() {
                             label: '時間をえらぶ',
                             data: 'action=set_notification_time',
                             mode: 'time',
-                            initial: '07:00',
-                            max: '10:00',
-                            min: '05:00'
+                            initial: '07:00'
+                            // ★★★ maxとminの縛りを、今度こそ完全に消しといたで！ ★★★
                         },
                         style: 'primary',
                         color: '#ff5722',
