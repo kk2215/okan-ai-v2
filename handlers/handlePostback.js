@@ -18,27 +18,56 @@ async function handlePostback(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
+        // --- 新しいリマインダー登録フロー ---
+        if (action === 'new_reminder') {
+            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
+        }
+        if (action === 'set_reminder_datetime') {
+            const datetime = event.postback.params.datetime;
+            const title = user.tempData.reminderTitle;
+            
+            const reminderData = {
+                title: title,
+                type: 'once',
+                targetDate: new Date(datetime).toISOString(),
+            };
+
+            await updateUserState(userId, 'AWAITING_REMINDER_REPEAT', { reminderData: reminderData });
+            const repeatMessage = createAskReminderRepeatMessage();
+            return client.replyMessage(event.replyToken, repeatMessage);
+        }
+        if (action === 'set_reminder_repeat') {
+            const repeatType = data.get('type');
+            let reminderData = user.tempData.reminderData;
+
+            if (repeatType === 'weekly') {
+                reminderData.type = 'weekly';
+                const date = new Date(reminderData.targetDate);
+                reminderData.dayOfWeek = date.getDay();
+                reminderData.notificationTime = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+            }
+            
+            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData: reminderData });
+            const confirmMessage = createConfirmReminderMessage([reminderData]);
+            return client.replyMessage(event.replyToken, confirmMessage);
+        }
+
         // --- ゴミの日登録（曜日選択） ---
         if (action === 'set_garbage_day') {
             const dayOfWeek = parseInt(data.get('day'), 10);
             const dayMap = ['日曜','月曜','火曜','水曜','木曜','金曜','土曜'];
             
             let selectedDays = user.tempData.selectedDays || [];
-            let replyText;
-
-            // 既に選ばれてたら削除、なかったら追加する（トグル機能）
             if (selectedDays.includes(dayOfWeek)) {
                 selectedDays = selectedDays.filter(d => d !== dayOfWeek);
-                replyText = `「${dayMap[dayOfWeek]}」を取り消したで！`;
             } else {
                 selectedDays.push(dayOfWeek);
-                replyText = `「${dayMap[dayOfWeek]}」を追加したで！`;
             }
             
             await updateUserState(userId, 'AWAITING_GARBAGE_DAY_OF_WEEK', { ...user.tempData, selectedDays: selectedDays });
             
-            // 押したことがわかるように、返事だけする
-            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
+            return;
         }
 
         // --- ゴミの日登録（曜日決定） ---
@@ -66,10 +95,6 @@ async function handlePostback(event, client) {
         }
 
         // --- リマインダーメニューのボタン処理 ---
-        if (action === 'new_reminder') {
-            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
-        }
         if (action === 'list_reminders') {
             const reminders = await getReminders(userId);
             if (reminders.length === 0) {
