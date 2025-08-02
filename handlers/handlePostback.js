@@ -8,6 +8,7 @@ const { createTrainLineConfirmationMessage } = require('../templates/trainLineCo
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
+const { zonedTimeToUtc } = require('date-fns-tz'); // ★★★ ほんまもんの時計の専門家を呼んでくるで！ ★★★
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -24,13 +25,17 @@ async function handlePostback(event, client) {
             return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
         }
         if (action === 'set_reminder_datetime') {
-            const datetime = event.postback.params.datetime;
+            const datetime = event.postback.params.datetime; // 例: '2025-08-02T12:00'
             const title = user.tempData.reminderTitle;
+            
+            // ★★★ これがほんまの時差ボケ修正や！ ★★★
+            // LINEから来た時刻の文字列を、無理やり「これは日本の時間やで！」と解釈させる
+            const jstDate = zonedTimeToUtc(datetime, 'Asia/Tokyo');
             
             const reminderData = {
                 title: title,
                 type: 'once',
-                targetDate: new Date(datetime).toISOString(),
+                targetDate: jstDate.toISOString(), // 世界標準時(UTC)でDBに保存する
             };
 
             await updateUserState(userId, 'AWAITING_REMINDER_REPEAT', { reminderData: reminderData });
@@ -44,11 +49,13 @@ async function handlePostback(event, client) {
             if (repeatType === 'weekly') {
                 reminderData.type = 'weekly';
                 const date = new Date(reminderData.targetDate);
-                reminderData.dayOfWeek = date.getDay();
+                reminderData.dayOfWeek = date.getUTCDay(); // UTCで保存されてるから、UTCの曜日を取得
                 reminderData.notificationTime = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
             }
             
-            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { reminderData: reminderData });
+            // ★★★ 確認忘れのバグも直しといたで！ ★★★
+            // ちゃんと「複数の予定」として、一時保存する
+            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { remindersData: [reminderData] });
             const confirmMessage = createConfirmReminderMessage([reminderData]);
             return client.replyMessage(event.replyToken, confirmMessage);
         }
@@ -137,15 +144,11 @@ async function handlePostback(event, client) {
                 return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、どの場所を選んだか、わからんようになってしもたわ…' });
             }
             const selectedLocation = locations[locationIndex];
-            
-            // ★★★ これがほんまの最後の修正や！ ★★★
-            // 名前と緯度経度を、ちゃんとセットで渡したる！
             await updateUserLocation(userId, { 
                 location: selectedLocation.locationForWeather, 
                 lat: selectedLocation.lat, 
                 lng: selectedLocation.lng 
             });
-
             await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
             const replyText = `「${selectedLocation.formattedAddress}」やね、承知したで！`;
             const nextMessage = createAskNotificationTimeMessage();
