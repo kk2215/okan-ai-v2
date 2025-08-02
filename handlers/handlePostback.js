@@ -8,7 +8,6 @@ const { createTrainLineConfirmationMessage } = require('../templates/trainLineCo
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
-const { zonedTimeToUtc } = require('date-fns-tz'); // ★★★ ほんまもんの時計の専門家を呼んでくるで！ ★★★
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -29,8 +28,8 @@ async function handlePostback(event, client) {
             const title = user.tempData.reminderTitle;
             
             // ★★★ これがほんまの時差ボケ修正や！ ★★★
-            // LINEから来た時刻の文字列を、無理やり「これは日本の時間やで！」と解釈させる
-            const jstDate = zonedTimeToUtc(datetime, 'Asia/Tokyo');
+            // LINEから来た時刻の文字列に、日本のタイムゾーン情報(+09:00)を付け足す
+            const jstDate = new Date(datetime + '+09:00');
             
             const reminderData = {
                 title: title,
