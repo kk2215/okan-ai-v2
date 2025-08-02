@@ -12,32 +12,39 @@ if (process.env.GOOGLE_MAPS_API_KEY) {
 }
 
 /**
- * 出発地と目的地の緯度経度から、経由する全ての路線名を取得する
- * @param {object} originCoords - { lat, lng }
- * @param {object} destinationCoords - { lat, lng }
+ * 出発地と目的地から、経由する全ての路線名を取得する
+ * @param {string} from - 出発地
+ * @param {string} to - 目的地
  * @returns {Promise<string[]|null>} 路線名の配列
  */
-async function getLinesFromRoute(originCoords, destinationCoords) {
+async function getLinesFromRoute(from, to) {
     if (!mapsClient) {
         return null;
     }
 
+    // ★★★ これがほんまの最終奥義や！ ★★★
+    // サーバーが何時でも、絶対に電車が動いとる「明日の朝8時」に出発する設定にする
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(8, 0, 0, 0);
+    const departureTime = Math.floor(tomorrow.getTime() / 1000); // 秒単位のタイムスタンプに変換
+
     try {
         const response = await mapsClient.directions({
             params: {
-                // ★★★ これが最後の作戦や！曖昧な地名やのうて、緯度経度で聞く！ ★★★
-                origin: originCoords,
-                destination: destinationCoords,
+                origin: from,
+                destination: to,
                 mode: 'transit',
                 language: 'ja',
                 region: 'jp',
+                departure_time: departureTime, // ★★★ 時間を指定する！ ★★★
                 key: process.env.GOOGLE_MAPS_API_KEY
             },
             timeout: 3000,
         });
 
         if (response.data.status !== 'OK' || !response.data.routes || response.data.routes.length === 0) {
-            console.warn(`Directions APIで経路が見つからんかったわ`, response.data.status);
+            console.warn(`Directions APIで経路が見つからんかったわ: ${from} -> ${to}`, response.data.status);
             return [];
         }
 
@@ -55,7 +62,7 @@ async function getLinesFromRoute(originCoords, destinationCoords) {
         return Array.from(allLines);
 
     } catch (error) {
-        console.error(`Directions APIでエラーが発生`, error.response ? error.response.data : error.message);
+        console.error(`Directions APIでエラーが発生: ${from} -> ${to}`, error.response ? error.response.data : error.message);
         return null;
     }
 }
