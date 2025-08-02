@@ -41,7 +41,6 @@ async function handleMessage(event, client) {
                     dateTimeMessage
                 ]);
             }
-            // 日時選択ボタンが押されるのを待ってる時は、文字で返事されても困るから、優しく促す
             if (state === 'AWAITING_REMINDER_DATETIME') {
                 return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、下の「日時をえらぶ」ボタンで教えてくれるか？' });
             }
