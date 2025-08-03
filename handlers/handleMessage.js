@@ -1,14 +1,10 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
-const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
-const { getLinesFromRoute } = require('../services/directions');
-const { searchLocations, findPlaceIdForStation } = require('../services/geocoding');
+const { getUser, updateUserState, saveUserTrainLines, updateUserLocation } = require('../services/user');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
-const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
-const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage');
 
@@ -65,29 +61,12 @@ async function handleMessage(event, client) {
                 return client.replyMessage(event.replyToken, daySelectionMessage);
             }
             
-            // --- その他の初期設定フロー ---
-            if (state === 'AWAITING_LOCATION') {
-                const locations = await searchLocations(messageText);
-                if (!locations || locations.length === 0) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${messageText}」っていう場所、見つけられへんかったわ…。もう一回、市町村名から教えてくれるか？` });
-                }
-                if (locations.length === 1) {
-                    const location = locations[0];
-                    await updateUserLocation(userId, { location: location.locationForWeather, placeId: location.placeId });
-                    await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
-                    const replyText = `「${location.formattedAddress}」やね、覚えたで！`;
-                    const nextMessage = createAskNotificationTimeMessage();
-                    return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
-                }
-                await updateUserState(userId, 'AWAITING_LOCATION_SELECTION', { locations: locations });
-                const selectionMessage = createLocationSelectionMessage(locations);
-                return client.replyMessage(event.replyToken, selectionMessage);
-            }
+            // --- 路線登録フロー ---
             if (state === 'AWAITING_TRAIN_LINE') {
                 if (messageText === '電車の設定する') {
-                    await updateUserState(userId, 'AWAITING_STATIONS');
-                    const nextMessage = createAskStationsMessage();
-                    return client.replyMessage(event.replyToken, nextMessage);
+                    await updateUserState(userId, 'AWAITING_LINE_SELECTION', { selectedLines: [] });
+                    const selectionMessage = createLineSelectionMessage();
+                    return client.replyMessage(event.replyToken, selectionMessage);
                 } else {
                     await saveUserTrainLines(userId, []);
                     await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
@@ -95,35 +74,8 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: '電車はええのね。ほな次いこか！' }, nextMessage]);
                 }
             }
-            if (state === 'AWAITING_STATIONS') {
-                const stations = messageText.split(/から|まで/g).map(s => s.trim()).filter(Boolean);
-                if (stations.length < 2) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「板橋から六本木」みたいにもう一回教えてくれるか？' });
-                }
-                const [from, to] = stations;
-
-                // ★★★ ここがほんまの最後の修正や！ ★★★
-                // 1. まず、駅探しのプロに、それぞれの駅の番地（プレイスID）を聞く
-                const fromPlaceId = await findPlaceIdForStation(from);
-                const toPlaceId = await findPlaceIdForStation(to);
-
-                if (!fromPlaceId || !toPlaceId) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
-                }
-                
-                // 2. その番地を元に、プロのナビはんに道案内を頼む
-                const allLines = await getLinesFromRoute(fromPlaceId, toPlaceId);
-
-                if (!allLines || allLines.length === 0) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの公共交通機関での行き方が見つからんかったわ…` });
-                }
-                await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
-                const selectionMessage = createLineSelectionMessage(allLines);
-                return client.replyMessage(event.replyToken, selectionMessage);
-            }
         }
 
-        // --- どの機能にも当てはまらんかった時の、賢い返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？予定を教えたい時は「リマインダー」って言うてみてな👵' });
 
     } catch (error) {
