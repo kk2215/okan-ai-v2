@@ -8,12 +8,9 @@ const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
-const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
-const { createReminderMenuMessage } = require('../templates/reminderMenuMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage');
-const chrono = require('chrono-node');
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -23,9 +20,18 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
+        // --- リマインダー機能は完璧やから、もう触らへん ---
+        const reminderKeywords = ['リマインダー', 'リマインド', '予定'];
+        if (reminderKeywords.includes(messageText) && !user.state) {
+            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
+        }
+
         // --- ステート（状態）に応じた会話の処理 ---
         if (user.state) {
             const state = user.state;
+
+            // --- リマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
                 const dateTimeMessage = createAskReminderDateTimeMessage();
@@ -37,6 +43,8 @@ async function handleMessage(event, client) {
             if (state === 'AWAITING_REMINDER_DATETIME') {
                 return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、下の「日時をえらぶ」ボタンで教えてくれるか？' });
             }
+
+            // --- ゴミの日登録フロー ---
             if (state === 'AWAITING_GARBAGE_DAY') {
                 if (messageText === 'ゴミの日を設定する') {
                     await updateUserState(userId, 'AWAITING_GARBAGE_TYPE');
@@ -57,6 +65,8 @@ async function handleMessage(event, client) {
                 const daySelectionMessage = createAskGarbageDayOfWeekMessage(messageText);
                 return client.replyMessage(event.replyToken, daySelectionMessage);
             }
+            
+            // --- その他の初期設定フロー ---
             if (state === 'AWAITING_LOCATION') {
                 const locations = await searchLocations(messageText);
                 if (!locations || locations.length === 0) {
@@ -92,12 +102,16 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「板橋から六本木」みたいにもう一回教えてくれるか？' });
                 }
                 const [from, to] = stations;
+
                 const fromPlaceId = await findPlaceIdForStation(from + '駅');
                 const toPlaceId = await findPlaceIdForStation(to + '駅');
+
                 if (!fromPlaceId || !toPlaceId) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
                 }
+                
                 const allLines = await getLinesFromRoute(fromPlaceId, toPlaceId);
+
                 if (!allLines || allLines.length === 0) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」から「${to}」までの公共交通機関での行き方が見つからんかったわ…` });
                 }
@@ -107,12 +121,7 @@ async function handleMessage(event, client) {
             }
         }
 
-        const reminderKeywords = ['リマインダー', 'リマインド', '予定'];
-        if (reminderKeywords.includes(messageText) && !user.state) {
-            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
-        }
-
+        // --- どの機能にも当てはまらんかった時の、賢い返事 ---
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？予定を教えたい時は「リマインダー」って言うてみてな👵' });
 
     } catch (error) {
