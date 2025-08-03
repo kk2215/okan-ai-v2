@@ -55,21 +55,23 @@ async function searchLocations(address) {
 async function findPlaceIdForStation(stationName) {
     if (!mapsClient) return null;
     try {
-        const response = await mapsClient.findPlaceFromText({
+        // ★★★ これがほんまの最終奥義や！駅探しのプロ「textSearch」を呼ぶ！ ★★★
+        const response = await mapsClient.textSearch({
             params: {
-                input: stationName,
-                inputtype: 'textquery',
-                fields: ['place_id'],
+                query: stationName,
+                type: 'train_station', // 「駅」だけを探すように指定
                 language: 'ja',
+                region: 'jp',
                 key: process.env.GOOGLE_MAPS_API_KEY,
             },
         });
-        if (response.data.status !== 'OK' || response.data.candidates.length === 0) {
+        if (response.data.status !== 'OK' || response.data.results.length === 0) {
+            console.warn(`Places API(Text Search)で駅が見つからんかったわ: ${stationName}`);
             return null;
         }
-        return response.data.candidates[0].place_id;
+        return response.data.results[0].place_id;
     } catch (error) {
-        console.error(`Places APIでエラーが発生: ${stationName}`, error.message);
+        console.error(`Places API(Text Search)でエラーが発生: ${stationName}`, error.message);
         return null;
     }
 }
