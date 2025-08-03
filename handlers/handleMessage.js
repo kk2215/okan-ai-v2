@@ -1,12 +1,12 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
-const { getUser, updateUserState, saveUserTrainLines, updateUserLocation } = require('../services/user');
+const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
-const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage');
+const { createRegionSelectionMessage } = require('../templates/trainSelectionMessages');
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -16,7 +16,7 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能は完璧やから、もう触らへん ---
+        // --- リマインダー機能の起動 ---
         const reminderKeywords = ['リマインダー', 'リマインド', '予定'];
         if (reminderKeywords.includes(messageText) && !user.state) {
             await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
@@ -27,6 +27,7 @@ async function handleMessage(event, client) {
         if (user.state) {
             const state = user.state;
 
+            // --- 新しいリマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
                 const dateTimeMessage = createAskReminderDateTimeMessage();
@@ -64,9 +65,9 @@ async function handleMessage(event, client) {
             // --- 路線登録フロー ---
             if (state === 'AWAITING_TRAIN_LINE') {
                 if (messageText === '電車の設定する') {
-                    await updateUserState(userId, 'AWAITING_LINE_SELECTION', { selectedLines: [] });
-                    const selectionMessage = createLineSelectionMessage();
-                    return client.replyMessage(event.replyToken, selectionMessage);
+                    await updateUserState(userId, 'AWAITING_REGION_SELECTION', { selectedLines: [] });
+                    const regionMessage = createRegionSelectionMessage();
+                    return client.replyMessage(event.replyToken, regionMessage);
                 } else {
                     await saveUserTrainLines(userId, []);
                     await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
