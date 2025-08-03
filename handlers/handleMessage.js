@@ -1,9 +1,11 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
+const { searchLocations } = require('../services/geocoding');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
+const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage');
 const { createRegionSelectionMessage } = require('../templates/trainSelectionMessages');
@@ -16,7 +18,7 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能の起動 ---
+        // --- リマインダー機能は完璧やから、もう触らへん ---
         const reminderKeywords = ['リマインダー', 'リマインド', '予定'];
         if (reminderKeywords.includes(messageText) && !user.state) {
             await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
@@ -27,7 +29,6 @@ async function handleMessage(event, client) {
         if (user.state) {
             const state = user.state;
 
-            // --- 新しいリマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
                 const dateTimeMessage = createAskReminderDateTimeMessage();
@@ -74,6 +75,25 @@ async function handleMessage(event, client) {
                     const nextMessage = createAskGarbageDayMessage();
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: '電車はええのね。ほな次いこか！' }, nextMessage]);
                 }
+            }
+
+            // --- 地理登録フロー ---
+            if (state === 'AWAITING_LOCATION') {
+                const locations = await searchLocations(messageText);
+                if (!locations || locations.length === 0) {
+                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${messageText}」っていう場所、見つけられへんかったわ…。もう一回、市町村名から教えてくれるか？` });
+                }
+                if (locations.length === 1) {
+                    const location = locations[0];
+                    await updateUserLocation(userId, { location: location.locationForWeather, lat: location.lat, lng: location.lng });
+                    await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
+                    const replyText = `「${location.formattedAddress}」やね、覚えたで！`;
+                    const nextMessage = createAskNotificationTimeMessage();
+                    return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
+                }
+                await updateUserState(userId, 'AWAITING_LOCATION_SELECTION', { locations: locations });
+                const selectionMessage = createLocationSelectionMessage(locations);
+                return client.replyMessage(event.replyToken, selectionMessage);
             }
         }
 

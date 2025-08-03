@@ -47,36 +47,6 @@ async function searchLocations(address) {
     }
 }
 
-/**
- * 駅名から、駅の番地（プレイスID）を取得する
- * @param {string} stationName - ユーザーが入力した駅名
- * @returns {Promise<string|null>}
- */
-async function findPlaceIdForStation(stationName) {
-    if (!mapsClient) return null;
-    try {
-        // ★★★ これがほんまの最終奥義や！駅探しのプロ「textSearch」を呼ぶ！ ★★★
-        const response = await mapsClient.textSearch({
-            params: {
-                query: stationName,
-                type: 'train_station', // 「駅」だけを探すように指定
-                language: 'ja',
-                region: 'jp',
-                key: process.env.GOOGLE_MAPS_API_KEY,
-            },
-        });
-        if (response.data.status !== 'OK' || response.data.results.length === 0) {
-            console.warn(`Places API(Text Search)で駅が見つからんかったわ: ${stationName}`);
-            return null;
-        }
-        return response.data.results[0].place_id;
-    } catch (error) {
-        console.error(`Places API(Text Search)でエラーが発生: ${stationName}`, error.message);
-        return null;
-    }
-}
-
 module.exports = {
     searchLocations,
-    findPlaceIdForStation,
 };
