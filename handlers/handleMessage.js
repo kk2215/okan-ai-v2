@@ -31,7 +31,6 @@ async function handleMessage(event, client) {
         if (user.state) {
             const state = user.state;
 
-            // --- リマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
                 const dateTimeMessage = createAskReminderDateTimeMessage();
@@ -103,13 +102,16 @@ async function handleMessage(event, client) {
                 }
                 const [from, to] = stations;
 
-                const fromPlaceId = await findPlaceIdForStation(from + '駅');
-                const toPlaceId = await findPlaceIdForStation(to + '駅');
+                // ★★★ ここがほんまの最後の修正や！ ★★★
+                // 1. まず、駅探しのプロに、それぞれの駅の番地（プレイスID）を聞く
+                const fromPlaceId = await findPlaceIdForStation(from);
+                const toPlaceId = await findPlaceIdForStation(to);
 
                 if (!fromPlaceId || !toPlaceId) {
                     return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」か「${to}」、どっちかの場所が見つからんかったわ…` });
                 }
                 
+                // 2. その番地を元に、プロのナビはんに道案内を頼む
                 const allLines = await getLinesFromRoute(fromPlaceId, toPlaceId);
 
                 if (!allLines || allLines.length === 0) {
