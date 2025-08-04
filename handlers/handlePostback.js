@@ -8,7 +8,7 @@ const { createTrainLineConfirmationMessage } = require('../templates/trainLineCo
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
-const { createAskLocationMessage } = require('../templates/askLocationMessage'); // 新しい設計図
+const { createAskLocationMessage } = require('../templates/askLocationMessage');
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -19,7 +19,15 @@ async function handlePostback(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // ★★★ 新しい仕事：初期設定を始めるボタン ★★★
+        // --- ★★★ ここがほんまの最後の修正や！ ★★★ ---
+        // --- 路線登録フロー（乗り換え駅追加） ---
+        if (action === 'add_transfer_station') {
+            await updateUserState(userId, 'AWAITING_TRANSFER_STATION');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'どこの駅で乗り換えるんや？' });
+        }
+
+
+        // --- 初期設定を始めるボタン ---
         if (action === 'start_setup') {
             await updateUserState(userId, 'AWAITING_LOCATION');
             const askLocationMessage = createAskLocationMessage();
@@ -209,7 +217,7 @@ async function handlePostback(event, client) {
 
     } catch (error) {
         console.error('ボタンの処理でエラーが出てもうたわ:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめんやで、今ちょっとボタンが効かへんみたい…。' });
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめんやで、今ちょっとボタンが効へんみたい…。' });
     }
 }
 
