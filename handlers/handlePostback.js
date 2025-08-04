@@ -1,6 +1,6 @@
 // handlers/handlePostback.js - ボタン押下（ポストバックイベント）の処理を担当
 
-const { getUser, updateUserState, updateUserNotificationTime, saveUserTrainLines } = require('../services/user');
+const { getUser, updateUserState, updateUserNotificationTime, saveUserTrainLines, updateUserLocation } = require('../services/user');
 const { saveReminder, getReminders, deleteReminder } = require('../services/reminder');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
@@ -8,6 +8,7 @@ const { createTrainLineConfirmationMessage } = require('../templates/trainLineCo
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
+const { createAskLocationMessage } = require('../templates/askLocationMessage'); // 新しい設計図
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -17,6 +18,48 @@ async function handlePostback(event, client) {
     try {
         const user = await getUser(userId);
         if (!user) return;
+
+        // ★★★ 新しい仕事：初期設定を始めるボタン ★★★
+        if (action === 'start_setup') {
+            await updateUserState(userId, 'AWAITING_LOCATION');
+            const askLocationMessage = createAskLocationMessage();
+            return client.replyMessage(event.replyToken, askLocationMessage);
+        }
+
+        // --- 新しいリマインダー登録フロー ---
+        if (action === 'new_reminder') {
+            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
+        }
+        if (action === 'set_reminder_datetime') {
+            const datetime = event.postback.params.datetime;
+            const title = user.tempData.reminderTitle;
+            
+            const reminderData = {
+                title: title,
+                type: 'once',
+                targetDate: new Date(datetime + '+09:00').toISOString(),
+            };
+
+            await updateUserState(userId, 'AWAITING_REMINDER_REPEAT', { reminderData: reminderData });
+            const repeatMessage = createAskReminderRepeatMessage();
+            return client.replyMessage(event.replyToken, repeatMessage);
+        }
+        if (action === 'set_reminder_repeat') {
+            const repeatType = data.get('type');
+            let reminderData = user.tempData.reminderData;
+
+            if (repeatType === 'weekly') {
+                reminderData.type = 'weekly';
+                const date = new Date(reminderData.targetDate);
+                reminderData.dayOfWeek = date.getUTCDay();
+                reminderData.notificationTime = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+            }
+            
+            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { remindersData: [reminderData] });
+            const confirmMessage = createConfirmReminderMessage([reminderData]);
+            return client.replyMessage(event.replyToken, confirmMessage);
+        }
 
         // --- ゴミの日登録（曜日選択） ---
         if (action === 'set_garbage_day') {
@@ -63,10 +106,6 @@ async function handlePostback(event, client) {
         }
 
         // --- リマインダーメニューのボタン処理 ---
-        if (action === 'new_reminder') {
-            await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'ええで！何を教えたらええ？' });
-        }
         if (action === 'list_reminders') {
             const reminders = await getReminders(userId);
             if (reminders.length === 0) {
@@ -99,6 +138,23 @@ async function handlePostback(event, client) {
         }
 
         // --- 初期設定フローのボタン ---
+        if (action === 'select_location') {
+            const locationIndex = parseInt(data.get('index'), 10);
+            const locations = user.tempData.locations;
+            if (!locations || !locations[locationIndex]) {
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめん、どの場所を選んだか、わからんようになってしもたわ…' });
+            }
+            const selectedLocation = locations[locationIndex];
+            await updateUserLocation(userId, { 
+                location: selectedLocation.locationForWeather, 
+                lat: selectedLocation.lat, 
+                lng: selectedLocation.lng 
+            });
+            await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
+            const replyText = `「${selectedLocation.formattedAddress}」やね、承知したで！`;
+            const nextMessage = createAskNotificationTimeMessage();
+            return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
+        }
         if (action === 'set_notification_time') {
             const time = event.postback.params.time;
             await updateUserNotificationTime(userId, time);
@@ -149,10 +205,6 @@ async function handlePostback(event, client) {
              await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
              const nextMessage = createAskGarbageDayMessage();
              return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ほな、やめとこか。' }, nextMessage]);
-        }
-        if (action === 'add_transfer_station') {
-            await updateUserState(userId, 'AWAITING_TRANSFER_STATION');
-            return client.replyMessage(event.replyToken, { type: 'text', text: 'どこの駅で乗り換えるんや？' });
         }
 
     } catch (error) {
