@@ -150,7 +150,6 @@ async function handlePostback(event, client) {
              const nextMessage = createAskGarbageDayMessage();
              return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ほな、やめとこか。' }, nextMessage]);
         }
-        // ★★★ 新しい仕事：乗り換え駅を追加するボタン ★★★
         if (action === 'add_transfer_station') {
             await updateUserState(userId, 'AWAITING_TRANSFER_STATION');
             return client.replyMessage(event.replyToken, { type: 'text', text: 'どこの駅で乗り換えるんや？' });
