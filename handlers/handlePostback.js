@@ -8,6 +8,7 @@ const { createTrainLineConfirmationMessage } = require('../templates/trainLineCo
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
+const { createAskLocationMessage } = require('../templates/askLocationMessage'); // 新しい設計図
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -17,6 +18,13 @@ async function handlePostback(event, client) {
     try {
         const user = await getUser(userId);
         if (!user) return;
+
+        // ★★★ 新しい仕事：初期設定を始めるボタン ★★★
+        if (action === 'start_setup') {
+            await updateUserState(userId, 'AWAITING_LOCATION');
+            const askLocationMessage = createAskLocationMessage();
+            return client.replyMessage(event.replyToken, askLocationMessage);
+        }
 
         // --- 新しいリマインダー登録フロー ---
         if (action === 'new_reminder') {

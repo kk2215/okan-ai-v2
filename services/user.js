@@ -18,12 +18,26 @@ async function getUser(userId) {
 }
 
 /**
- * 新しいユーザーを作成、または既存ユーザー情報を更新する
- * @param {object} userData - { userId, displayName, state? } を含むユーザーデータ
+ * 新しいユーザーを名簿に作成する（すでにおる場合は、名前だけ更新する）
+ * @param {object} userData - { userId, displayName } を含むユーザーデータ
  */
 async function saveUser(userData) {
     const db = getDb();
     const userRef = db.collection(USERS_COLLECTION).doc(userData.userId);
+    const doc = await userRef.get();
+
+    // もしユーザーがすでにおったら、名前だけ更新する
+    if (doc.exists) {
+        if (doc.data().displayName !== userData.displayName) {
+            await userRef.update({
+                displayName: userData.displayName,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+        return;
+    }
+
+    // 新しいユーザーやったら、名簿を作る
     const initialData = {
         userId: userData.userId,
         displayName: userData.displayName,
@@ -32,16 +46,13 @@ async function saveUser(userData) {
         lat: null,
         lng: null,
         trainLines: [],
-        // ★★★ これがほんまの最後の修正や！ ★★★
-        // 渡された状態があればそれを使い、なければnullにする
-        state: userData.state || null,
+        state: null, // ★★★ 状態は、必ずnullで作成する ★★★
         tempData: {},
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
     };
-    // setに { merge: true } をつけると、ドキュメントがなくても作成、あっても指定した項目だけ更新してくれる
-    await userRef.set(initialData, { merge: true });
-    console.log(`ユーザー情報を保存しました: ${userData.displayName} (${userData.userId})`);
+    await userRef.set(initialData);
+    console.log(`新しいユーザーを名簿に書いといたで: ${userData.displayName}`);
 }
 
 /**
