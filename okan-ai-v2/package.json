@@ -7,7 +7,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@googlemaps/google-maps-services-js": "^3.4.0",
     "@line/bot-sdk": "^8.4.1",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
