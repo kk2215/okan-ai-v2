@@ -2,7 +2,7 @@
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { getLinesFromRoute } = require('../services/directions');
-const { searchLocations, findPlaceIdForStation } = require('../services/geocoding');
+const { searchLocations, findPlaceIdForStation } = require('../services/geocoding'); // ★★★ ちゃんと、新しい仕事も頼めるようにする ★★★
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
@@ -20,7 +20,7 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能の起動 ---
+        // --- リマインダー機能は完璧やから、もう触らへん ---
         const reminderKeywords = ['リマインダー', 'リマインド', '予定'];
         if (reminderKeywords.includes(messageText) && !user.state) {
             await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
@@ -31,7 +31,6 @@ async function handleMessage(event, client) {
         if (user.state) {
             const state = user.state;
 
-            // --- 新しいリマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
                 const dateTimeMessage = createAskReminderDateTimeMessage();
@@ -126,7 +125,7 @@ async function handleMessage(event, client) {
 
     } catch (error) {
         console.error('メッセージの処理でエラーが出てもうたわ:', error);
-        return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめんやで、ちょっと今忙しいみたい…。また後で話しかけてくれる？' });
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'ごめんやで、ちょっと今忙しいみたい…。また後で話しかけてくれるか？' });
     }
 }
 
