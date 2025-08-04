@@ -5,33 +5,6 @@ const { getDb, FieldValue } = require('./firestore');
 const USERS_COLLECTION = 'users';
 
 /**
- * 新しいユーザーを作成、または既存ユーザー情報を更新する
- * @param {object} userData - { userId, displayName, state? } を含むユーザーデータ
- */
-async function saveUser(userData) {
-    const db = getDb();
-    const userRef = db.collection(USERS_COLLECTION).doc(userData.userId);
-    const initialData = {
-        userId: userData.userId,
-        displayName: userData.displayName,
-        notificationTime: '07:00',
-        location: null,
-        lat: null,
-        lng: null,
-        trainLines: [],
-        // ★★★ ここがほんまの最後の修正や！ ★★★
-        // 渡された状態があればそれを使い、なければnullにする
-        state: userData.state || null,
-        tempData: {},
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-    };
-    // setに { merge: true } をつけると、ドキュメントがなくても作成、あっても指定した項目だけ更新してくれる
-    await userRef.set(initialData, { merge: true });
-    console.log(`ユーザー情報を保存しました: ${userData.displayName} (${userData.userId})`);
-}
-
-/**
  * ユーザー情報を取得する
  * @param {string} userId - LINEのユーザーID
  * @returns {Promise<object|null>} ユーザーデータ、存在しない場合はnull
@@ -42,6 +15,42 @@ async function getUser(userId) {
     const doc = await userRef.get();
     if (!doc.exists) { return null; }
     return doc.data();
+}
+
+/**
+ * 新しいユーザーを名簿に作成する（すでにおる場合は、名前だけ更新する）
+ * @param {object} userData - { userId, displayName } を含むユーザーデータ
+ */
+async function createUser(userData) {
+    const db = getDb();
+    const userRef = db.collection(USERS_COLLECTION).doc(userData.userId);
+    const doc = await userRef.get();
+
+    if (doc.exists) {
+        console.log(`ユーザーはもうおるみたいやな: ${userData.displayName}`);
+        // もし名前が変わっとったら、更新しとく
+        await userRef.update({ 
+            displayName: userData.displayName,
+            updatedAt: FieldValue.serverTimestamp()
+        });
+        return;
+    }
+
+    const initialData = {
+        userId: userData.userId,
+        displayName: userData.displayName,
+        notificationTime: '07:00',
+        location: null,
+        lat: null,
+        lng: null,
+        trainLines: [],
+        state: null,
+        tempData: {},
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+    };
+    await userRef.set(initialData);
+    console.log(`新しいユーザーを名簿に書いといたで: ${userData.displayName}`);
 }
 
 /**
@@ -118,8 +127,8 @@ async function saveUserTrainLines(userId, lines) {
 }
 
 module.exports = {
-    saveUser,
     getUser,
+    createUser, // 新しい専門家
     updateUserState,
     updateUserLocation,
     updateUserNotificationTime,
