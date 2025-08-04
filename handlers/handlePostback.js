@@ -1,6 +1,6 @@
 // handlers/handlePostback.js - ボタン押下（ポストバックイベント）の処理を担当
 
-const { getUser, updateUserState, updateUserNotificationTime, saveUserTrainLines, updateUserLocation } = require('../services/user');
+const { getUser, updateUserState, updateUserNotificationTime, saveUserTrainLines } = require('../services/user');
 const { saveReminder, getReminders, deleteReminder } = require('../services/reminder');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
@@ -8,7 +8,6 @@ const { createTrainLineConfirmationMessage } = require('../templates/trainLineCo
 const { createListRemindersMessage } = require('../templates/listRemindersMessage');
 const { createConfirmReminderMessage } = require('../templates/confirmReminderMessage');
 const { createAskReminderRepeatMessage } = require('../templates/askReminderRepeatMessage');
-const { createCompanySelectionMessage, createLineSelectionMessage } = require('../templates/trainSelectionMessages');
 
 async function handlePostback(event, client) {
     const userId = event.source.userId;
@@ -18,78 +17,6 @@ async function handlePostback(event, client) {
     try {
         const user = await getUser(userId);
         if (!user) return;
-
-        // --- 新しいリマインダー登録フロー ---
-        if (action === 'set_reminder_datetime') {
-            const datetime = event.postback.params.datetime;
-            const title = user.tempData.reminderTitle;
-            
-            const reminderData = {
-                title: title,
-                type: 'once',
-                targetDate: new Date(datetime + '+09:00').toISOString(),
-            };
-
-            await updateUserState(userId, 'AWAITING_REMINDER_REPEAT', { reminderData: reminderData });
-            const repeatMessage = createAskReminderRepeatMessage();
-            return client.replyMessage(event.replyToken, repeatMessage);
-        }
-        if (action === 'set_reminder_repeat') {
-            const repeatType = data.get('type');
-            let reminderData = user.tempData.reminderData;
-
-            if (repeatType === 'weekly') {
-                reminderData.type = 'weekly';
-                const date = new Date(reminderData.targetDate);
-                reminderData.dayOfWeek = date.getUTCDay();
-                reminderData.notificationTime = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
-            }
-            
-            await updateUserState(userId, 'AWAITING_REMINDER_CONFIRMATION', { remindersData: [reminderData] });
-            const confirmMessage = createConfirmReminderMessage([reminderData]);
-            return client.replyMessage(event.replyToken, confirmMessage);
-        }
-
-        // --- 路線登録フロー ---
-        if (action === 'select_region') {
-            const region = data.get('region');
-            await updateUserState(userId, 'AWAITING_COMPANY_SELECTION', { ...user.tempData, region: region });
-            const companyMessage = createCompanySelectionMessage(region);
-            return client.replyMessage(event.replyToken, companyMessage);
-        }
-        if (action === 'select_company') {
-            const company = data.get('company');
-            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, company: company });
-            const lineMessage = createLineSelectionMessage(user.tempData.region, company);
-            return client.replyMessage(event.replyToken, lineMessage);
-        }
-        if (action === 'add_line') {
-            const lineToAdd = data.get('line');
-            let selectedLines = user.tempData.selectedLines || [];
-            let replyText;
-            
-            if (selectedLines.includes(lineToAdd)) {
-                selectedLines = selectedLines.filter(l => l !== lineToAdd);
-                replyText = `「${lineToAdd}」を取り消したで！`;
-            } else {
-                selectedLines.push(lineToAdd);
-                replyText = `「${lineToAdd}」を追加したで！`;
-            }
-            
-            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, selectedLines: selectedLines });
-            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
-        }
-        if (action === 'confirm_line_selection') {
-            const selectedLines = user.tempData.selectedLines || [];
-            if (selectedLines.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: '路線が一つも選ばれてへんで！' }); }
-            
-            await saveUserTrainLines(userId, selectedLines);
-            await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
-            const replyText = 'よっしゃ、登録しといたで！';
-            const nextMessage = createAskGarbageDayMessage();
-            return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
-        }
-
 
         // --- ゴミの日登録（曜日選択） ---
         if (action === 'set_garbage_day') {
@@ -169,6 +96,64 @@ async function handlePostback(event, client) {
         if (action === 'cancel_reminder') {
             await updateUserState(userId, null);
             return client.replyMessage(event.replyToken, { type: 'text', text: 'ほな、やめとこか。' });
+        }
+
+        // --- 初期設定フローのボタン ---
+        if (action === 'set_notification_time') {
+            const time = event.postback.params.time;
+            await updateUserNotificationTime(userId, time);
+            await updateUserState(userId, 'AWAITING_TRAIN_LINE');
+            return client.replyMessage(event.replyToken, {
+                type: 'text',
+                text: `「${time}」やね、承知したで！\n次は電車の設定や。下のボタンから選んでな。`,
+                quickReply: {
+                    items: [
+                        { type: 'action', action: { type: 'message', label: '設定する', text: '電車の設定する' }},
+                        { type: 'action', action: { type: 'message', label: 'いらん', text: 'なし' }}
+                    ]
+                }
+            });
+        }
+        if (action === 'add_line') {
+            const lineToAdd = data.get('line');
+            let selectedLines = user.tempData.selectedLines || [];
+            let replyText;
+            
+            if (selectedLines.includes(lineToAdd)) {
+                selectedLines = selectedLines.filter(l => l !== lineToAdd);
+                replyText = `「${lineToAdd}」を取り消したで！`;
+            } else {
+                selectedLines.push(lineToAdd);
+                replyText = `「${lineToAdd}」を追加したで！`;
+            }
+            
+            await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, selectedLines: selectedLines });
+            return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
+        }
+        if (action === 'confirm_line_selection') {
+            const selectedLines = user.tempData.selectedLines || [];
+            if (selectedLines.length === 0) { return client.replyMessage(event.replyToken, { type: 'text', text: '路線が一つも選ばれてへんで！' }); }
+            await updateUserState(userId, 'AWAITING_TRAIN_CONFIRMATION', { lines: selectedLines });
+            const confirmationMessage = createTrainLineConfirmationMessage(selectedLines);
+            return client.replyMessage(event.replyToken, confirmationMessage);
+        }
+        if (action === 'confirm_train_lines') {
+            const lines = user.tempData.lines;
+            await saveUserTrainLines(userId, lines);
+            await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
+            const replyText = 'よっしゃ、登録しといたで！';
+            const nextMessage = createAskGarbageDayMessage();
+            return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
+        }
+        if (action === 'cancel_train_lines') {
+             await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
+             const nextMessage = createAskGarbageDayMessage();
+             return client.replyMessage(event.replyToken, [{ type: 'text', text: 'ほな、やめとこか。' }, nextMessage]);
+        }
+        // ★★★ 新しい仕事：乗り換え駅を追加するボタン ★★★
+        if (action === 'add_transfer_station') {
+            await updateUserState(userId, 'AWAITING_TRANSFER_STATION');
+            return client.replyMessage(event.replyToken, { type: 'text', text: 'どこの駅で乗り換えるんや？' });
         }
 
     } catch (error) {

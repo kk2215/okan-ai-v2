@@ -2,32 +2,21 @@
 
 function createLineSelectionMessage(lines) {
     if (!lines || lines.length === 0) {
-        return { type: 'text', text: 'ごめん、その駅を通る路線が見つからんかったわ。' };
+        return { type: 'text', text: 'ごめん、路線が見つからんかったわ。' };
     }
 
     const bubbles = [];
-    for (let i = 0; i < lines.length; i += 6) {
-        const chunk = lines.slice(i, i + 6);
+    for (let i = 0; i < lines.length; i += 5) {
+        const chunk = lines.slice(i, i + 5);
         const buttons = chunk.map(line => ({
             type: 'button',
-            action: {
-                type: 'postback',
-                label: line,
-                data: `action=add_line&line=${encodeURIComponent(line)}`,
-                displayText: `「${line}」を追加` // ★★★ ハンコ ★★★
-            },
+            action: { type: 'postback', label: line, data: `action=add_line&line=${encodeURIComponent(line)}`, displayText: `「${line}」を追加/取り消し` },
             style: 'secondary',
             margin: 'sm'
         }));
-        
         bubbles.push({
             type: 'bubble',
-            body: {
-                type: 'box',
-                layout: 'vertical',
-                spacing: 'sm',
-                contents: buttons
-            }
+            body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: buttons }
         });
     }
 
@@ -44,13 +33,26 @@ function createLineSelectionMessage(lines) {
                     type: 'button',
                     action: {
                         type: 'postback',
+                        label: '乗り換え駅を追加',
+                        data: 'action=add_transfer_station',
+                        displayText: '乗り換え駅を追加する'
+                    },
+                    style: 'secondary',
+                    height: 'sm',
+                    margin: 'md'
+                },
+                {
+                    type: 'button',
+                    action: {
+                        type: 'postback',
                         label: 'これで決定！',
                         data: 'action=confirm_line_selection',
-                        displayText: 'これで決定！' // ★★★ ハンコ ★★★
+                        displayText: '路線を決定する'
                     },
                     style: 'primary',
                     color: '#ff5722',
-                    height: 'sm'
+                    height: 'sm',
+                    margin: 'md'
                 }
             ]
         }
