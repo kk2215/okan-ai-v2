@@ -1,14 +1,12 @@
 // handlers/handleMessage.js - テキストメッセージの処理を担当
 
-const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
-const { getLinesByStationName } = require('../services/heartrails');
+const { getUser, updateUserState, saveUserTrainLines, updateUserLocation } = require('../services/user');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
-const { createAskStationsMessage } = require('../templates/askStationsMessage');
-const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage');
+const { createRegionSelectionMessage } = require('../templates/trainSelectionMessages');
 
 async function handleMessage(event, client) {
     const userId = event.source.userId;
@@ -18,7 +16,7 @@ async function handleMessage(event, client) {
         const user = await getUser(userId);
         if (!user) return;
 
-        // --- リマインダー機能は完璧やから、もう触らへん ---
+        // --- リマインダー機能の起動 ---
         const reminderKeywords = ['リマインダー', 'リマインド', '予定'];
         if (reminderKeywords.includes(messageText) && !user.state) {
             await updateUserState(userId, 'AWAITING_REMINDER_TITLE');
@@ -29,6 +27,7 @@ async function handleMessage(event, client) {
         if (user.state) {
             const state = user.state;
 
+            // --- 新しいリマインダー登録フロー ---
             if (state === 'AWAITING_REMINDER_TITLE') {
                 await updateUserState(userId, 'AWAITING_REMINDER_DATETIME', { reminderTitle: messageText });
                 const dateTimeMessage = createAskReminderDateTimeMessage();
@@ -66,9 +65,9 @@ async function handleMessage(event, client) {
             // --- 路線登録フロー ---
             if (state === 'AWAITING_TRAIN_LINE') {
                 if (messageText === '電車の設定する') {
-                    await updateUserState(userId, 'AWAITING_STATIONS');
-                    const nextMessage = createAskStationsMessage();
-                    return client.replyMessage(event.replyToken, nextMessage);
+                    await updateUserState(userId, 'AWAITING_REGION_SELECTION', { selectedLines: [] });
+                    const regionMessage = createRegionSelectionMessage();
+                    return client.replyMessage(event.replyToken, regionMessage);
                 } else {
                     await saveUserTrainLines(userId, []);
                     await updateUserState(userId, 'AWAITING_GARBAGE_DAY');
@@ -76,44 +75,8 @@ async function handleMessage(event, client) {
                     return client.replyMessage(event.replyToken, [{ type: 'text', text: '電車はええのね。ほな次いこか！' }, nextMessage]);
                 }
             }
-            if (state === 'AWAITING_STATIONS') {
-                const stations = messageText.split(/から|まで/g).map(s => s.trim()).filter(Boolean);
-                if (stations.length < 2) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: 'すまんな、駅がようわからんかったわ。「板橋から六本木」みたいにもう一回教えてくれるか？' });
-                }
-                const [from, to] = stations;
 
-                const linesFrom = await getLinesByStationName(from);
-                const linesTo = await getLinesByStationName(to);
-
-                if ((!linesFrom || linesFrom.length === 0) && (!linesTo || linesTo.length === 0)) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${from}」も「${to}」も見つからんかったわ…駅の名前、間違えてへんか？` });
-                }
-                
-                const allLines = [...new Set([...(linesFrom || []), ...(linesTo || [])])];
-                
-                await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
-                const selectionMessage = createLineSelectionMessage(allLines);
-                return client.replyMessage(event.replyToken, selectionMessage);
-            }
-            if (state === 'AWAITING_TRANSFER_STATION') {
-                const transferStation = messageText;
-                const transferLines = await getLinesByStationName(transferStation);
-
-                if (!transferLines || transferLines.length === 0) {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${transferStation}」っていう駅、見つけられへんかったわ…` });
-                }
-
-                const currentLines = user.tempData.availableLines || [];
-                const allLines = [...new Set([...currentLines, ...transferLines])];
-
-                await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, availableLines: allLines });
-                const selectionMessage = createLineSelectionMessage(allLines);
-                return client.replyMessage(event.replyToken, [
-                    { type: 'text', text: `「${transferStation}」の路線も追加しといたで！` },
-                    selectionMessage
-                ]);
-            }
+            // --- 地理登録は、もうGoogle APIを使わへんから、ここには来ないはずや ---
         }
 
         return client.replyMessage(event.replyToken, { type: 'text', text: 'どないしたん？予定を教えたい時は「リマインダー」って言うてみてな👵' });
