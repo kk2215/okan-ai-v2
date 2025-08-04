@@ -2,11 +2,13 @@
 
 const { getUser, updateUserState, updateUserLocation, saveUserTrainLines } = require('../services/user');
 const { getLinesByStationName } = require('../services/heartrails');
+const { searchLocations } = require('../services/geocoding');
 const { createAskNotificationTimeMessage } = require('../templates/askNotificationTimeMessage');
 const { createAskStationsMessage } = require('../templates/askStationsMessage');
 const { createLineSelectionMessage } = require('../templates/lineSelectionMessage');
 const { createAskGarbageDayMessage } = require('../templates/askGarbageDayMessage');
 const { createSetupCompleteMessage } = require('../templates/setupCompleteMessage');
+const { createLocationSelectionMessage } = require('../templates/locationSelectionMessage');
 const { createAskGarbageDayOfWeekMessage } = require('../templates/askGarbageDayOfWeekMessage');
 const { createAskReminderDateTimeMessage } = require('../templates/askReminderDateTimeMessage');
 
@@ -113,6 +115,25 @@ async function handleMessage(event, client) {
                     { type: 'text', text: `「${transferStation}」の路線も追加しといたで！` },
                     selectionMessage
                 ]);
+            }
+
+            // --- 地理登録フロー ---
+            if (state === 'AWAITING_LOCATION') {
+                const locations = await searchLocations(messageText);
+                if (!locations || locations.length === 0) {
+                    return client.replyMessage(event.replyToken, { type: 'text', text: `ごめん、「${messageText}」っていう場所、見つけられへんかったわ…。もう一回、市町村名から教えてくれるか？` });
+                }
+                if (locations.length === 1) {
+                    const location = locations[0];
+                    await updateUserLocation(userId, { location: location.locationForWeather, lat: location.lat, lng: location.lng });
+                    await updateUserState(userId, 'AWAITING_NOTIFICATION_TIME');
+                    const replyText = `「${location.formattedAddress}」やね、覚えたで！`;
+                    const nextMessage = createAskNotificationTimeMessage();
+                    return client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }, nextMessage]);
+                }
+                await updateUserState(userId, 'AWAITING_LOCATION_SELECTION', { locations: locations });
+                const selectionMessage = createLocationSelectionMessage(locations);
+                return client.replyMessage(event.replyToken, selectionMessage);
             }
         }
 

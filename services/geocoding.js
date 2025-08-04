@@ -1,4 +1,4 @@
-// services/geocoding.js - Google Geocoding & Places APIと通信する専門家
+// services/geocoding.js - Google Geocoding APIと通信する専門家
 
 const { Client } = require("@googlemaps/google-maps-services-js");
 
@@ -47,34 +47,6 @@ async function searchLocations(address) {
     }
 }
 
-/**
- * 駅名から、駅の番地（プレイスID）を取得する
- * @param {string} stationName - ユーザーが入力した駅名
- * @returns {Promise<string|null>}
- */
-async function findPlaceIdForStation(stationName) {
-    if (!mapsClient) return null;
-    try {
-        const response = await mapsClient.findPlaceFromText({
-            params: {
-                input: stationName,
-                inputtype: 'textquery',
-                fields: ['place_id'],
-                language: 'ja',
-                key: process.env.GOOGLE_MAPS_API_KEY,
-            },
-        });
-        if (response.data.status !== 'OK' || response.data.candidates.length === 0) {
-            return null;
-        }
-        return response.data.candidates[0].place_id;
-    } catch (error) {
-        console.error(`Places APIでエラーが発生: ${stationName}`, error.message);
-        return null;
-    }
-}
-
 module.exports = {
     searchLocations,
-    findPlaceIdForStation,
 };
