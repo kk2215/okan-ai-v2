@@ -1,6 +1,6 @@
 // handlers/handleFollow.js - 友だち追加イベントを担当
 
-const { createUser, updateUserState } = require('../services/user');
+const { saveUser } = require('../services/user'); // updateUserStateはもういらん
 const { createWelcomeMessage } = require('../templates/welcomeMessage');
 const { createAskLocationMessage } = require('../templates/askLocationMessage');
 
@@ -17,16 +17,14 @@ async function handleFollow(event, client) {
         const profile = await client.getProfile(userId);
 
         // ★★★ これがほんまの最後の修正や！ ★★★
-        // 1. まず、ユーザーの名簿を作る（すでにおったら名前だけ更新）
-        await createUser({
+        // ユーザーの名簿を作ると同時に、「地理登録の返事待ち」ってメモも、一発で書き込む！
+        await saveUser({
             userId: profile.userId,
             displayName: profile.displayName,
+            state: 'AWAITING_LOCATION' // 最初の状態をここで指定する
         });
         
-        // 2. その後で、必ず状態を「地域の返信待ち」に更新する
-        await updateUserState(userId, 'AWAITING_LOCATION');
-
-        // 3. 挨拶と最初の質問を一緒に送信
+        // 挨拶と最初の質問を一緒に送信
         const welcomeMessage = createWelcomeMessage(profile.displayName);
         const askLocationMessage = createAskLocationMessage();
         
