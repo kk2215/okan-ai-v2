@@ -95,7 +95,7 @@ async function handleMessage(event, client) {
                 const allLines = [...new Set([...(linesFrom || []), ...(linesTo || [])])];
                 
                 await updateUserState(userId, 'AWAITING_LINE_SELECTION', { availableLines: allLines, selectedLines: [] });
-                const selectionMessage = createLineSelectionMessage(allLines);
+                const selectionMessage = createLineSelectionMessage(allLines, []);
                 return client.replyMessage(event.replyToken, selectionMessage);
             }
             if (state === 'AWAITING_TRANSFER_STATION') {
@@ -107,10 +107,11 @@ async function handleMessage(event, client) {
                 }
 
                 const currentLines = user.tempData.availableLines || [];
+                const selectedLines = user.tempData.selectedLines || []; // ★★★ ちゃんと、今まで選んだやつを引き継ぐ！ ★★★
                 const allLines = [...new Set([...currentLines, ...transferLines])];
 
-                await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, availableLines: allLines });
-                const selectionMessage = createLineSelectionMessage(allLines);
+                await updateUserState(userId, 'AWAITING_LINE_SELECTION', { ...user.tempData, availableLines: allLines, selectedLines: selectedLines });
+                const selectionMessage = createLineSelectionMessage(allLines, selectedLines);
                 return client.replyMessage(event.replyToken, [
                     { type: 'text', text: `「${transferStation}」の路線も追加しといたで！` },
                     selectionMessage
