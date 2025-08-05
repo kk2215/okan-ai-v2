@@ -5,7 +5,6 @@ function createLineSelectionMessage(availableLines, selectedLines = []) {
         return { type: 'text', text: 'ごめん、路線が見つからんかったわ。' };
     }
 
-    // ★★★ ここからが、ほんまの最終奥義や！ ★★★
     const bubbles = [];
     for (let i = 0; i < availableLines.length; i += 5) {
         const chunk = availableLines.slice(i, i + 5);
